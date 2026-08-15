@@ -640,19 +640,139 @@ def is_turkish_mkv_track(item):
     return False
 
 
+def read_text_file(fpath):
+    """Farklı kodlamaları (UTF-8, UTF-8-BOM, CP1254, ISO-8859-9, Latin-1) deneyerek dosyayı okur."""
+    for enc in ["utf-8-sig", "utf-8", "cp1254", "iso-8859-9", "latin-1"]:
+        try:
+            with open(fpath, "r", encoding=enc) as f:
+                return f.read()
+        except (UnicodeDecodeError, UnicodeError):
+            continue
+    with open(fpath, "r", encoding="utf-8", errors="replace") as f:
+        return f.read()
+
+
 class SubtitleConverter:
-    """Farklı altyazı formatları (vtt, ttml, ass, txt) arasında dönüşüm yapar."""
+    """Farklı altyazı formatları (vtt, ttml, ass, srt, txt) arasında dönüşüm yapar."""
+
+    @staticmethod
+    def parse_srt(srt_content):
+        """SRT içeriğini detaylı ve esnek şekilde ayrıştırır."""
+        if not srt_content:
+            return []
+        if srt_content.startswith('\ufeff'):
+            srt_content = srt_content[1:]
+        srt_content = srt_content.replace('\r\n', '\n').replace('\r', '\n')
+
+        pattern = re.compile(
+            r'(\d{1,2}:\d{2}:\d{2}[\.,]\d{1,3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}[\.,]\d{1,3})[^\n]*'
+        )
+
+        matches = list(pattern.finditer(srt_content))
+        subtitles = []
+
+        for i, match in enumerate(matches):
+            start_time = match.group(1)
+            end_time = match.group(2)
+            text_start = match.end()
+
+            if i + 1 < len(matches):
+                text_end = matches[i + 1].start()
+                raw_block = srt_content[text_start:text_end]
+                raw_block = re.sub(r'\n\s*\d+\s*$', '', raw_block)
+            else:
+                raw_block = srt_content[text_start:]
+                raw_block = re.sub(r'\n\s*\d+\s*$', '', raw_block)
+
+            lines = [l.strip() for l in raw_block.split('\n')]
+            while lines and not lines[0]:
+                lines.pop(0)
+            while lines and not lines[-1]:
+                lines.pop()
+
+            text = "\n".join(lines)
+            if text:
+                subtitles.append((start_time, end_time, text))
+
+        return subtitles
+
+    @staticmethod
+    def fmt_ass_time(t_str):
+        """Zaman damgasını ASS formatına dönüştürür (H:MM:SS.cc)."""
+        t_str = t_str.replace(',', '.')
+        parts = t_str.split(':')
+        if len(parts) == 3:
+            h, m, s = parts
+        elif len(parts) == 2:
+            h = "0"
+            m, s = parts
+        else:
+            return "0:00:00.00"
+
+        sec_parts = s.split('.')
+        sec = sec_parts[0]
+        ms_raw = sec_parts[1] if len(sec_parts) > 1 else "0"
+
+        ms_3 = (ms_raw + "000")[:3]
+        cs = min(99, int(ms_3) // 10)
+
+        return f"{int(h)}:{int(m):02d}:{int(sec):02d}.{cs:02d}"
+
+    @staticmethod
+    def fmt_srt_time(ass_t_str):
+        """ASS zaman damgasını SRT formatına dönüştürür (HH:MM:SS,mmm)."""
+        parts = ass_t_str.strip().split(':')
+        if len(parts) == 3:
+            h, m, s = parts
+            h = f"{int(h):02d}"
+        elif len(parts) == 2:
+            h = "00"
+            m, s = parts
+        else:
+            return "00:00:00,000"
+
+        sec_parts = s.split('.')
+        sec = f"{int(sec_parts[0]):02d}"
+        cs = sec_parts[1] if len(sec_parts) > 1 else "0"
+        ms = (cs + "00")[:2] + "0"
+        return f"{h}:{int(m):02d}:{sec},{ms}"
+
+    @staticmethod
+    def convert_html_to_ass_tags(text):
+        """HTML etiketlerini ASS etiketlerine çevirir."""
+        text = re.sub(r'<i>(.*?)</i>', r'{\\i1}\1{\\i0}', text, flags=re.IGNORECASE | re.DOTALL)
+        text = re.sub(r'<b>(.*?)</b>', r'{\\b1}\1{\\b0}', text, flags=re.IGNORECASE | re.DOTALL)
+        text = re.sub(r'<u>(.*?)</u>', r'{\\u1}\1{\\u0}', text, flags=re.IGNORECASE | re.DOTALL)
+        text = re.sub(r'<[^>]+>', '', text)
+        return text
+
+    @staticmethod
+    def convert_ass_tags_to_html(text):
+        """ASS etiketlerini HTML / temiz metne çevirir."""
+        text = re.sub(r'\{\\i1\}(.*?)\{\\i0\}', r'<i>\1</i>', text)
+        text = re.sub(r'\{\\b1\}(.*?)\{\\b0\}', r'<b>\1</b>', text)
+        text = re.sub(r'\{\\u1\}(.*?)\{\\u0\}', r'<u>\1</u>', text)
+        text = re.sub(r'\{[^}]+\}', '', text)
+        return text
 
     @staticmethod
     def vtt_to_srt(vtt_content):
-        lines = vtt_content.splitlines()
+        if not vtt_content:
+            return ""
+        if vtt_content.startswith('\ufeff'):
+            vtt_content = vtt_content[1:]
+        vtt_content = vtt_content.replace('\r\n', '\n').replace('\r', '\n')
+
+        pattern = re.compile(
+            r'(\d{1,2}:)?(\d{2}:\d{2}[\.,]\d{3})\s*-->\s*(\d{1,2}:)?(\d{2}:\d{2}[\.,]\d{3})[^\n]*'
+        )
         srt_lines = []
         idx = 1
+        lines = vtt_content.split('\n')
 
         i = 0
         while i < len(lines):
             line = lines[i].strip()
-
             if line.startswith("WEBVTT") or line.startswith("NOTE") or line.startswith("STYLE"):
                 i += 1
                 while i < len(lines) and lines[i].strip():
@@ -660,24 +780,32 @@ class SubtitleConverter:
                 continue
 
             if "-->" in line:
-                timing = line.replace(".", ",")
-                timing = re.sub(r'(\d+:\d+:\d+),(\d{3})\d*', r'\1,\2', timing)
-                timing = re.sub(r'(\d+:\d+),(\d{3})\d*', r'00:\1,\2', timing)
+                m = pattern.search(line)
+                if m:
+                    t_line = line.split("-->")
+                    start_str = t_line[0].strip().replace('.', ',')
+                    end_str = t_line[1].split()[0].strip().replace('.', ',')
+                    if start_str.count(':') == 1:
+                        start_str = "00:" + start_str
+                    if end_str.count(':') == 1:
+                        end_str = "00:" + end_str
 
-                text_lines = []
-                i += 1
-                while i < len(lines) and lines[i].strip():
-                    t_line = re.sub(r'<[^>]+>', '', lines[i].strip())
-                    if t_line:
-                        text_lines.append(t_line)
+                    text_lines = []
                     i += 1
+                    while i < len(lines) and lines[i].strip() and not lines[i].strip().isdigit() and "-->" not in lines[i]:
+                        t_l = re.sub(r'<[^>]+>', '', lines[i].strip())
+                        if t_l:
+                            text_lines.append(t_l)
+                        i += 1
 
-                if text_lines:
-                    srt_lines.append(str(idx))
-                    srt_lines.append(timing)
-                    srt_lines.extend(text_lines)
-                    srt_lines.append("")
-                    idx += 1
+                    if text_lines:
+                        srt_lines.append(str(idx))
+                        srt_lines.append(f"{start_str} --> {end_str}")
+                        srt_lines.extend(text_lines)
+                        srt_lines.append("")
+                        idx += 1
+                else:
+                    i += 1
             else:
                 i += 1
 
@@ -699,37 +827,55 @@ class SubtitleConverter:
             "[Events]\n"
             "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
         )
-        lines = srt_content.splitlines()
+        parsed = SubtitleConverter.parse_srt(srt_content)
         events = []
 
-        i = 0
-        while i < len(lines):
-            line = lines[i].strip()
-            if "-->" in line:
-                parts = line.split("-->")
-                start = parts[0].strip().replace(",", ".")
-                end = parts[1].split()[0].strip().replace(",", ".")
-
-                def fmt_time(t):
-                    p = t.split(":")
-                    if len(p) == 3:
-                        h, m, s = p
-                        sec, ms = s.split(".") if "." in s else (s, "000")
-                        return f"{int(h)}:{m}:{sec}.{ms[:2]}"
-                    return "0:00:00.00"
-
-                text_lines = []
-                i += 1
-                while i < len(lines) and lines[i].strip():
-                    text_lines.append(lines[i].strip())
-                    i += 1
-
-                txt = "\\N".join(text_lines)
-                events.append(f"Dialogue: 0,{fmt_time(start)},{fmt_time(end)},Default,,0,0,0,,{txt}")
-            else:
-                i += 1
+        for start, end, text in parsed:
+            ass_start = SubtitleConverter.fmt_ass_time(start)
+            ass_end = SubtitleConverter.fmt_ass_time(end)
+            ass_text = SubtitleConverter.convert_html_to_ass_tags(text)
+            ass_text = ass_text.replace('\n', '\\N')
+            events.append(f"Dialogue: 0,{ass_start},{ass_end},Default,,0,0,0,,{ass_text}")
 
         return header + "\n".join(events)
+
+    @staticmethod
+    def ass_to_srt(ass_content):
+        if not ass_content:
+            return ""
+        if ass_content.startswith('\ufeff'):
+            ass_content = ass_content[1:]
+        lines = ass_content.splitlines()
+
+        events = []
+        in_events = False
+        format_headers = []
+
+        for line in lines:
+            line_str = line.strip()
+            if line_str.lower() == "[events]":
+                in_events = True
+                continue
+            if in_events:
+                if line_str.startswith("Format:"):
+                    format_headers = [h.strip().lower() for h in line_str[7:].split(",")]
+                elif line_str.startswith("Dialogue:"):
+                    parts = line_str[9:].split(",", len(format_headers) - 1 if format_headers else 9)
+                    if len(parts) >= 9:
+                        start_t = parts[1].strip()
+                        end_t = parts[2].strip()
+                        raw_txt = parts[-1].strip()
+                        raw_txt = raw_txt.replace("\\N", "\n").replace("\\n", "\n")
+                        clean_txt = SubtitleConverter.convert_ass_tags_to_html(raw_txt)
+                        events.append((start_t, end_t, clean_txt))
+
+        srt_blocks = []
+        for idx, (start_t, end_t, txt) in enumerate(events, 1):
+            srt_start = SubtitleConverter.fmt_srt_time(start_t)
+            srt_end = SubtitleConverter.fmt_srt_time(end_t)
+            srt_blocks.append(f"{idx}\n{srt_start} --> {srt_end}\n{txt}\n")
+
+        return "\n".join(srt_blocks)
 
 
 # ══════════════════════════════════════════════════════
@@ -2000,16 +2146,16 @@ class NollySubApp:
         tk.Label(conv_win, text="🔄 Altyazı Format Dönüştürücü", bg=COLORS["bg_surface"],
                  fg=COLORS["text_primary"], font=("Segoe UI", 13, "bold")).pack(anchor=tk.W, padx=20, pady=15)
 
-        target_fmt = tk.StringVar(value="srt")
+        target_fmt = tk.StringVar(value="ass")
 
         fmt_frame = tk.Frame(conv_win, bg=COLORS["bg_surface"])
         fmt_frame.pack(fill=tk.X, padx=20, pady=10)
 
         tk.Label(fmt_frame, text="Hedef Format:", bg=COLORS["bg_surface"], fg=COLORS["text_secondary"]).pack(side=tk.LEFT)
 
-        tk.Radiobutton(fmt_frame, text="SRT (.srt)", variable=target_fmt, value="srt",
-                       bg=COLORS["bg_surface"], fg="white", selectcolor=COLORS["bg_deep"]).pack(side=tk.LEFT, padx=10)
         tk.Radiobutton(fmt_frame, text="ASS (.ass)", variable=target_fmt, value="ass",
+                       bg=COLORS["bg_surface"], fg="white", selectcolor=COLORS["bg_deep"]).pack(side=tk.LEFT, padx=10)
+        tk.Radiobutton(fmt_frame, text="SRT (.srt)", variable=target_fmt, value="srt",
                        bg=COLORS["bg_surface"], fg="white", selectcolor=COLORS["bg_deep"]).pack(side=tk.LEFT, padx=10)
 
         def start_conversion():
@@ -2019,8 +2165,10 @@ class NollySubApp:
 
             for fpath in files:
                 try:
-                    with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
-                        content = f.read()
+                    content = read_text_file(fpath)
+                    if not content or not content.strip():
+                        failed.append(f"{os.path.basename(fpath)}: Dosya boş veya okunamadı.")
+                        continue
 
                     base, ext = os.path.splitext(fpath)
                     ext = ext.lower()
@@ -2028,9 +2176,11 @@ class NollySubApp:
                     if fmt == "srt":
                         if ext == ".vtt":
                             res_text = SubtitleConverter.vtt_to_srt(content)
+                        elif ext == ".ass":
+                            res_text = SubtitleConverter.ass_to_srt(content)
                         else:
                             res_text = content
-                        out_path = base + ".converted.srt"
+                        out_ext = ".srt"
 
                     elif fmt == "ass":
                         if ext == ".srt":
@@ -2038,11 +2188,20 @@ class NollySubApp:
                         elif ext == ".vtt":
                             srt_mid = SubtitleConverter.vtt_to_srt(content)
                             res_text = SubtitleConverter.srt_to_ass(srt_mid)
-                        else:
+                        elif ext == ".ass":
                             res_text = content
-                        out_path = base + ".converted.ass"
+                        else:
+                            res_text = SubtitleConverter.srt_to_ass(content)
+                        out_ext = ".ass"
+                    else:
+                        continue
 
-                    with open(out_path, "w", encoding="utf-8") as f:
+                    if ext == out_ext:
+                        out_path = base + f".converted{out_ext}"
+                    else:
+                        out_path = base + out_ext
+
+                    with open(out_path, "w", encoding="utf-8-sig") as f:
                         f.write(res_text)
                     converted.append(out_path)
 
