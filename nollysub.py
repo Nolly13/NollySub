@@ -90,6 +90,22 @@ COLORS = {
     "scrollbar": "#3a3a5a",
 }
 
+LANG_MAP = {
+    "tur": "Türkçe 🇹🇷",
+    "tr": "Türkçe 🇹🇷",
+    "eng": "İngilizce 🇬🇧",
+    "en": "İngilizce 🇬🇧",
+    "jpn": "Japonca 🇯🇵",
+    "ja": "Japonca 🇯🇵",
+    "ger": "Almanca 🇩🇪",
+    "deu": "Almanca 🇩🇪",
+    "fre": "Fransızca 🇫🇷",
+    "fra": "Fransızca 🇫🇷",
+    "spa": "İspanyolca 🇪🇸",
+    "es": "İspanyolca 🇪🇸",
+    "und": "Bilinmeyen (und)",
+}
+
 
 # ══════════════════════════════════════════════════════
 # AYAR YÖNETİCİSİ
@@ -892,6 +908,13 @@ class NollySubApp:
                         arrowcolor=COLORS["text_muted"],
                         relief="flat")
 
+        # İlerleme Çubuğu (Progressbar) Stili
+        style.configure("Custom.Horizontal.TProgressbar",
+                        troughcolor=COLORS["bg_deep"],
+                        background=COLORS["accent"],
+                        thickness=8,
+                        borderwidth=0)
+
     def _build_header(self, parent):
         """Üst başlık bölümü."""
         header = tk.Frame(parent, bg=COLORS["bg_surface"], height=70)
@@ -931,7 +954,7 @@ class NollySubApp:
         self.tools_menu = tk.Menu(self.root, tearoff=0,
                                   bg=COLORS["bg_elevated"], fg=COLORS["text_primary"],
                                   activebackground=COLORS["accent"], activeforeground="white",
-                                  font=("Segoe UI", 9.5))
+                                  font=("Segoe UI", 10))
         self.tools_menu.add_command(label="🎬  MKV Altyazı Çıkar", command=self._extract_subtitles_from_mkv_gui)
         self.tools_menu.add_command(label="🎙️  MKV Dublaj Değiştir", command=self._show_mkv_dub_changer_gui)
         self.tools_menu.add_separator()
@@ -968,7 +991,7 @@ class NollySubApp:
 
         settings_btn = tk.Button(btn_frame, text="⚙️ Ayarlar",
                                  bg=COLORS["accent"], fg="white",
-                                 font=("Segoe UI", 9.5, "bold"),
+                                 font=("Segoe UI", 10, "bold"),
                                  relief="flat", cursor="hand2",
                                  activebackground=COLORS["accent_hover"],
                                  activeforeground="white",
@@ -1083,10 +1106,10 @@ class NollySubApp:
         self.tree.heading("download_count", text="İndirme / Seeds", anchor=tk.E)
 
         self.tree.column("source", width=120, minwidth=100, stretch=False)
-        self.tree.column("title", width=420, minwidth=250, stretch=True)
-        self.tree.column("language", width=120, minwidth=90, stretch=False, anchor=tk.CENTER)
-        self.tree.column("release", width=220, minwidth=150, stretch=False)
-        self.tree.column("download_count", width=110, minwidth=90, stretch=False, anchor=tk.E)
+        self.tree.column("title", width=380, minwidth=220, stretch=True)
+        self.tree.column("language", width=110, minwidth=85, stretch=False, anchor=tk.CENTER)
+        self.tree.column("release", width=200, minwidth=140, stretch=False)
+        self.tree.column("download_count", width=160, minwidth=140, stretch=False, anchor=tk.E)
 
         # Scrollbar
         scrollbar = ttk.Scrollbar(container, orient=tk.VERTICAL, command=self.tree.yview, style="Dark.Vertical.TScrollbar")
@@ -1103,16 +1126,19 @@ class NollySubApp:
         footer.pack(fill=tk.X, side=tk.BOTTOM)
         footer.pack_propagate(False)
 
-        # Sol: Durum Etiketi
-        self.status_label = tk.Label(footer,
+        # Sol: Durum Etiketi ve İlerleme Çubuğu Kapsayıcısı
+        status_frame = tk.Frame(footer, bg=COLORS["bg_surface"])
+        status_frame.pack(side=tk.LEFT, padx=20)
+
+        self.status_label = tk.Label(status_frame,
                                      text="Hazır",
                                      bg=COLORS["bg_surface"],
                                      fg=COLORS["text_muted"],
-                                     font=("Segoe UI", 9))
-        self.status_label.pack(side=tk.LEFT, padx=20)
+                                     font=("Segoe UI", 10))
+        self.status_label.pack(side=tk.LEFT)
 
-        # İlerleme çubuğu
-        self.progress = ttk.Progressbar(footer, mode="indeterminate", length=150)
+        # İlerleme çubuğu (Özel stillendirilmiş)
+        self.progress = ttk.Progressbar(status_frame, mode="indeterminate", length=180, style="Custom.Horizontal.TProgressbar")
 
         # Sağ: İndir Butonu
         self.download_btn = tk.Button(footer,
@@ -1361,7 +1387,7 @@ class NollySubApp:
         os_btn.pack(side=tk.RIGHT)
 
         os_hint = tk.Label(os_card, text="💡 OpenSubtitles veritabanından altyazı indirmek için gereklidir.",
-                           bg=COLORS["bg_surface"], fg=COLORS["text_muted"], font=("Segoe UI", 8.5))
+                           bg=COLORS["bg_surface"], fg=COLORS["text_muted"], font=("Segoe UI", 9))
         os_hint.pack(anchor=tk.W)
 
         # 2. SUBDL API KEY
@@ -1399,7 +1425,7 @@ class NollySubApp:
         sd_btn.pack(side=tk.RIGHT)
 
         sd_hint = tk.Label(sd_card, text="💡 SubDL geniş altyazı arşivine erişmek için gereklidir.",
-                           bg=COLORS["bg_surface"], fg=COLORS["text_muted"], font=("Segoe UI", 8.5))
+                           bg=COLORS["bg_surface"], fg=COLORS["text_muted"], font=("Segoe UI", 9))
         sd_hint.pack(anchor=tk.W)
 
         # 3. İNDİRME KLASÖRÜ
@@ -1451,7 +1477,7 @@ class NollySubApp:
                 webbrowser.open("https://mkvtoolnix.download/downloads.html")
 
             mkv_dl_btn = tk.Button(mkv_row, text="📥 İndir", bg=COLORS["bg_elevated"], fg=COLORS["warning"],
-                                   font=("Segoe UI", 8.5, "bold"), relief="flat", cursor="hand2",
+                                   font=("Segoe UI", 9, "bold"), relief="flat", cursor="hand2",
                                    command=get_mkv)
             mkv_dl_btn.pack(side=tk.RIGHT)
 
@@ -1480,7 +1506,7 @@ class NollySubApp:
         save_btn.pack(side=tk.RIGHT, padx=(8, 0))
 
         cancel_btn = tk.Button(bottom_frame, text="Kapat", bg=COLORS["bg_elevated"], fg=COLORS["text_secondary"],
-                               font=("Segoe UI", 9.5), relief="flat", cursor="hand2",
+                               font=("Segoe UI", 10), relief="flat", cursor="hand2",
                                activebackground=COLORS["border_light"], activeforeground="white",
                                padx=14, pady=6, command=settings_win.destroy)
         cancel_btn.pack(side=tk.RIGHT)
@@ -1495,7 +1521,7 @@ class NollySubApp:
             os.startfile(d)
 
     def _extract_subtitles_from_mkv_gui(self):
-        """MKV'den altyazı çıkarma arayüzü."""
+        """MKV'den altyazı çıkarma arayüzü (Seçenek sunan tam sürüm)."""
         mmerge, mextract, _ = self.config.find_mkvtoolnix()
         if not mextract:
             messagebox.showerror(
@@ -1511,22 +1537,211 @@ class NollySubApp:
         if not files:
             return
 
-        out_dir = filedialog.askdirectory(title="Altyazıların Kaydedileceği Klasörü Seçin")
-        if not out_dir:
+        # Seçilen tüm MKV dosyalarındaki altyazı izlerini topla
+        all_sub_tracks = []
+        for fpath in files:
+            try:
+                tracks = MkvTools.get_tracks(fpath, mmerge)
+                for t in tracks:
+                    if t["type"] == "subtitles":
+                        all_sub_tracks.append({
+                            "mkv_path": fpath,
+                            "filename": os.path.basename(fpath),
+                            "track_id": t["id"],
+                            "lang": t["language"],
+                            "codec": t["codec"],
+                            "name": t["name"],
+                            "default": t["default"],
+                            "forced": t["forced"]
+                        })
+            except Exception as e:
+                print(f"Hata ({fpath}): {e}")
+
+        if not all_sub_tracks:
+            messagebox.showinfo("Bilgi", "Seçilen MKV dosyalarında gömülü altyazı izi bulunamadı.")
             return
 
-        count = 0
-        for f in files:
-            try:
-                extracted = MkvTools.extract_subtitles(f, out_dir, mextract, mmerge)
-                count += len(extracted)
-            except Exception as e:
-                print(f"Hata ({f}): {e}")
+        # Modal Pencere Oluştur
+        sub_win = tk.Toplevel(self.root)
+        sub_win.title("🎬 NollySub — MKV Altyazı Seçimi ve Çıkarma")
+        sub_win.geometry("820x540")
+        sub_win.configure(bg=COLORS["bg_surface"])
+        sub_win.transient(self.root)
 
-        messagebox.showinfo("İşlem Tamamlandı 🎉", f"Toplam {count} adet altyazı çıkarıldı!\n\nKonum: {out_dir}")
+        # Üst Başlık
+        header_frame = tk.Frame(sub_win, bg=COLORS["bg_surface"], padx=20, pady=15)
+        header_frame.pack(fill=tk.X)
+
+        tk.Label(header_frame, text="🎬 Çıkarılacak Altyazı İzlerini Seçin", bg=COLORS["bg_surface"],
+                 fg=COLORS["text_primary"], font=("Segoe UI", 13, "bold")).pack(anchor=tk.W)
+        tk.Label(header_frame, text=f"Toplam {len(files)} dosya içerisinden {len(all_sub_tracks)} altyazı izi bulundu. Çıkarmak istediklerinizi seçin:",
+                 bg=COLORS["bg_surface"], fg=COLORS["text_muted"], font=("Segoe UI", 9)).pack(anchor=tk.W, pady=(2, 0))
+
+        # Hızlı Seçim Butonları
+        quick_frame = tk.Frame(sub_win, bg=COLORS["bg_surface"], padx=20)
+        quick_frame.pack(fill=tk.X, pady=(0, 8))
+
+        # Treeview Liste
+        tree_container = tk.Frame(sub_win, bg=COLORS["bg_deep"], highlightthickness=1, highlightbackground=COLORS["border"])
+        tree_container.pack(fill=tk.BOTH, expand=True, padx=20, pady=5)
+
+        columns = ("select", "filename", "track_id", "lang", "codec", "name", "flags")
+        tree = ttk.Treeview(tree_container, columns=columns, show="headings", style="Dark.Treeview", selectmode="extended")
+
+        tree.heading("select", text="Durum", anchor=tk.CENTER)
+        tree.heading("filename", text="Dosya Adı", anchor=tk.W)
+        tree.heading("track_id", text="Pist ID", anchor=tk.CENTER)
+        tree.heading("lang", text="Dil", anchor=tk.CENTER)
+        tree.heading("codec", text="Format", anchor=tk.CENTER)
+        tree.heading("name", text="Başlık / İsim", anchor=tk.W)
+        tree.heading("flags", text="Bayraklar", anchor=tk.CENTER)
+
+        tree.column("select", width=85, minwidth=70, stretch=False, anchor=tk.CENTER)
+        tree.column("filename", width=220, minwidth=150, stretch=True, anchor=tk.W)
+        tree.column("track_id", width=65, minwidth=50, stretch=False, anchor=tk.CENTER)
+        tree.column("lang", width=120, minwidth=90, stretch=False, anchor=tk.CENTER)
+        tree.column("codec", width=95, minwidth=70, stretch=False, anchor=tk.CENTER)
+        tree.column("name", width=140, minwidth=100, stretch=False, anchor=tk.W)
+        tree.column("flags", width=100, minwidth=80, stretch=False, anchor=tk.CENTER)
+
+        scrollbar = ttk.Scrollbar(tree_container, orient=tk.VERTICAL, command=tree.yview, style="Dark.Vertical.TScrollbar")
+        tree.configure(yscrollcommand=scrollbar.set)
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        selected_states = {}
+
+        def get_lang_display(code):
+            code = (code or "und").lower()
+            return LANG_MAP.get(code, code.upper())
+
+        def populate_tree():
+            tree.delete(*tree.get_children())
+            selected_states.clear()
+            for idx, item in enumerate(all_sub_tracks):
+                lang_str = get_lang_display(item["lang"])
+                flags = []
+                if item["default"]: flags.append("Varsayılan")
+                if item["forced"]: flags.append("Zorunlu")
+                flag_str = ", ".join(flags) if flags else "-"
+
+                item_id = f"item_{idx}"
+                selected_states[item_id] = True
+                tree.insert("", "end", iid=item_id, values=(
+                    "☑️ Seçili",
+                    item["filename"],
+                    f"#{item['track_id']}",
+                    lang_str,
+                    item["codec"].upper(),
+                    item["name"] or "-",
+                    flag_str
+                ))
+
+        populate_tree()
+
+        def toggle_selection(event=None):
+            sel = tree.selection()
+            if not sel:
+                return
+            for iid in sel:
+                current = selected_states.get(iid, False)
+                new_state = not current
+                selected_states[iid] = new_state
+                vals = list(tree.item(iid, "values"))
+                vals[0] = "☑️ Seçili" if new_state else "☐ Seçilmedi"
+                tree.item(iid, values=vals)
+
+        tree.bind("<Double-1>", toggle_selection)
+        tree.bind("<space>", toggle_selection)
+
+        def select_all(state=True):
+            for iid in selected_states:
+                selected_states[iid] = state
+                vals = list(tree.item(iid, "values"))
+                vals[0] = "☑️ Seçili" if state else "☐ Seçilmedi"
+                tree.item(iid, values=vals)
+
+        def select_tr_only():
+            for idx, item in enumerate(all_sub_tracks):
+                iid = f"item_{idx}"
+                is_tr = item["lang"].lower() in ["tur", "tr"] or "türkçe" in (item["name"] or "").lower() or "turkish" in (item["name"] or "").lower()
+                selected_states[iid] = is_tr
+                vals = list(tree.item(iid, "values"))
+                vals[0] = "☑️ Seçili" if is_tr else "☐ Seçilmedi"
+                tree.item(iid, values=vals)
+
+        tk.Button(quick_frame, text="☑️ Tümünü Seç", bg=COLORS["bg_elevated"], fg=COLORS["text_primary"],
+                  font=("Segoe UI", 9), relief="flat", cursor="hand2", padx=10, pady=3,
+                  command=lambda: select_all(True)).pack(side=tk.LEFT, padx=(0, 6))
+
+        tk.Button(quick_frame, text="☐ Temizle", bg=COLORS["bg_elevated"], fg=COLORS["text_primary"],
+                  font=("Segoe UI", 9), relief="flat", cursor="hand2", padx=10, pady=3,
+                  command=lambda: select_all(False)).pack(side=tk.LEFT, padx=6)
+
+        tk.Button(quick_frame, text="🇹🇷 Sadece Türkçe", bg=COLORS["accent"], fg="white",
+                  font=("Segoe UI", 9, "bold"), relief="flat", cursor="hand2", padx=10, pady=3,
+                  command=select_tr_only).pack(side=tk.LEFT, padx=6)
+
+        tk.Label(quick_frame, text="💡 İpucu: Çift tıklayarak veya Boşluk tuşu ile seçimi değiştirebilirsiniz.",
+                 bg=COLORS["bg_surface"], fg=COLORS["text_muted"], font=("Segoe UI", 9)).pack(side=tk.RIGHT)
+
+        # Alt Butonlar
+        bottom_frame = tk.Frame(sub_win, bg=COLORS["bg_surface"], padx=20, pady=15)
+        bottom_frame.pack(fill=tk.X, side=tk.BOTTOM)
+
+        def start_extraction():
+            to_extract = [all_sub_tracks[int(iid.split("_")[1])] for iid, sel in selected_states.items() if sel]
+            if not to_extract:
+                messagebox.showwarning("Uyarı", "Lütfen en az bir altyazı izi seçin.")
+                return
+
+            out_dir = filedialog.askdirectory(title="Altyazıların Kaydedileceği Klasörü Seçin")
+            if not out_dir:
+                return
+
+            extracted_files = []
+            for item in to_extract:
+                try:
+                    fpath = item["mkv_path"]
+                    tid = item["track_id"]
+                    lang = item["lang"]
+                    codec = item["codec"].lower()
+
+                    ext = ".srt"
+                    if "ass" in codec or "ssa" in codec:
+                        ext = ".ass"
+                    elif "pgs" in codec or "hdmv" in codec:
+                        ext = ".sup"
+                    elif "vobsub" in codec:
+                        ext = ".idx"
+
+                    base = Path(fpath).stem
+                    out_file = os.path.join(out_dir, f"{base}.{lang}.track{tid}{ext}")
+                    cmd = [mextract, "tracks", fpath, f"{tid}:{out_file}"]
+                    res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore")
+                    if res.returncode == 0 and os.path.exists(out_file):
+                        extracted_files.append(out_file)
+                except Exception as e:
+                    print(f"Altyazı çıkarma hatası: {e}")
+
+            sub_win.destroy()
+            ans = messagebox.askyesno(
+                "İşlem Tamamlandı 🎉",
+                f"Seçilen {len(extracted_files)} adet altyazı başarıyla çıkarıldı!\n\nKonum: {out_dir}\n\nKlasör açılsın mı?"
+            )
+            if ans and os.path.exists(out_dir):
+                os.startfile(out_dir)
+
+        tk.Button(bottom_frame, text="⚡  Seçilen Altyazıları Çıkar", bg=COLORS["success"], fg="white",
+                  font=("Segoe UI", 10, "bold"), relief="flat", cursor="hand2", padx=20, pady=6,
+                  command=start_extraction).pack(side=tk.RIGHT)
+
+        tk.Button(bottom_frame, text="İptal", bg=COLORS["bg_elevated"], fg=COLORS["text_secondary"],
+                  font=("Segoe UI", 10), relief="flat", cursor="hand2", padx=14, pady=6,
+                  command=sub_win.destroy).pack(side=tk.RIGHT, padx=8)
 
     def _show_mkv_dub_changer_gui(self):
-        """MKV dublaj/ses izi değiştirici arayüzü."""
+        """MKV dublaj/ses izi değiştirici arayüzü (Tam Çalışan Sürüm)."""
         mmerge, _, mpropedit = self.config.find_mkvtoolnix()
         if not mpropedit:
             messagebox.showerror(
@@ -1537,12 +1752,157 @@ class NollySubApp:
 
         dub_win = tk.Toplevel(self.root)
         dub_win.title("🎙️ NollySub — MKV Dublaj & Ses İzi Değiştirici")
-        dub_win.geometry("640x480")
+        dub_win.geometry("740x540")
         dub_win.configure(bg=COLORS["bg_surface"])
         dub_win.transient(self.root)
 
-        tk.Label(dub_win, text="🎙️ MKV Varsayılan Ses (Dublaj) Ayarlayıcı", bg=COLORS["bg_surface"],
-                 fg=COLORS["text_primary"], font=("Segoe UI", 12, "bold")).pack(anchor=tk.W, padx=20, pady=15)
+        # Üst Bilgi
+        header_frame = tk.Frame(dub_win, bg=COLORS["bg_surface"], padx=20, pady=15)
+        header_frame.pack(fill=tk.X)
+
+        tk.Label(header_frame, text="🎙️ MKV Varsayılan Ses İzi (Dublaj) Ayarlayıcı", bg=COLORS["bg_surface"],
+                 fg=COLORS["text_primary"], font=("Segoe UI", 13, "bold")).pack(anchor=tk.W)
+        tk.Label(header_frame, text="MKV dosyasındaki varsayılan ses izini (Japonca, Türkçe, İngilizce vb.) doğrudan günceller.",
+                 bg=COLORS["bg_surface"], fg=COLORS["text_muted"], font=("Segoe UI", 9)).pack(anchor=tk.W, pady=(2, 0))
+
+        # Dosya Seçim Alanı
+        file_card = tk.Frame(dub_win, bg=COLORS["bg_elevated"], padx=15, pady=12, highlightthickness=1, highlightbackground=COLORS["border"])
+        file_card.pack(fill=tk.X, padx=20, pady=5)
+
+        selected_files = []
+        file_label_var = tk.StringVar(value="Henüz dosya seçilmedi")
+
+        tk.Label(file_card, textvariable=file_label_var, bg=COLORS["bg_elevated"],
+                 fg=COLORS["text_primary"], font=("Segoe UI", 9, "bold"), anchor=tk.W).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # Ses İzleri Listesi
+        tracks_frame = tk.Frame(dub_win, bg=COLORS["bg_surface"], padx=20, pady=10)
+        tracks_frame.pack(fill=tk.BOTH, expand=True)
+
+        tk.Label(tracks_frame, text="Mevcut Ses İzleri (Dublajlar):", bg=COLORS["bg_surface"],
+                 fg=COLORS["text_secondary"], font=("Segoe UI", 10, "bold")).pack(anchor=tk.W, pady=(0, 5))
+
+        list_container = tk.Frame(tracks_frame, bg=COLORS["bg_deep"], highlightthickness=1, highlightbackground=COLORS["border"])
+        list_container.pack(fill=tk.BOTH, expand=True)
+
+        selected_audio_id = tk.IntVar(value=-1)
+        audio_tracks = []
+
+        inner_tracks_frame = tk.Frame(list_container, bg=COLORS["bg_deep"])
+        inner_tracks_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        def get_lang_display(code):
+            code = (code or "und").lower()
+            return LANG_MAP.get(code, code.upper())
+
+        def load_mkv_tracks():
+            nonlocal audio_tracks
+            for widget in inner_tracks_frame.winfo_children():
+                widget.destroy()
+
+            if not selected_files:
+                tk.Label(inner_tracks_frame, text="Lütfen yukarıdaki butondan bir MKV dosyası seçin.",
+                         bg=COLORS["bg_deep"], fg=COLORS["text_muted"], font=("Segoe UI", 10)).pack(pady=40)
+                return
+
+            try:
+                all_t = MkvTools.get_tracks(selected_files[0], mmerge)
+                audio_tracks = [t for t in all_t if t["type"] == "audio"]
+
+                if not audio_tracks:
+                    tk.Label(inner_tracks_frame, text="Seçilen dosyada herhangi bir ses izi bulunamadı.",
+                             bg=COLORS["bg_deep"], fg=COLORS["warning"], font=("Segoe UI", 10)).pack(pady=40)
+                    return
+
+                def_id = audio_tracks[0]["id"]
+                for t in audio_tracks:
+                    if t["default"]:
+                        def_id = t["id"]
+                        break
+                selected_audio_id.set(def_id)
+
+                for t in audio_tracks:
+                    tid = t["id"]
+                    lang_str = get_lang_display(t["language"])
+                    name_str = t["name"] or "-"
+                    codec_str = t["codec"].upper()
+                    is_def = t["default"]
+
+                    row = tk.Frame(inner_tracks_frame, bg=COLORS["bg_surface"], padx=12, pady=10,
+                                   highlightthickness=1, highlightbackground=COLORS["border"])
+                    row.pack(fill=tk.X, pady=4)
+
+                    rb = tk.Radiobutton(row, text="", variable=selected_audio_id, value=tid,
+                                        bg=COLORS["bg_surface"], selectcolor=COLORS["bg_deep"], activebackground=COLORS["bg_surface"])
+                    rb.pack(side=tk.LEFT)
+
+                    lbl_txt = f"Ses İzi #{tid+1}  |  Dil: {lang_str}  |  Format: {codec_str}  |  İsim: {name_str}"
+                    if is_def:
+                        lbl_txt += "  🟢 [Mevcut Varsayılan]"
+
+                    lbl = tk.Label(row, text=lbl_txt, bg=COLORS["bg_surface"],
+                                   fg=COLORS["success"] if is_def else COLORS["text_primary"],
+                                   font=("Segoe UI", 10, "bold" if is_def else "normal"))
+                    lbl.pack(side=tk.LEFT, padx=8)
+
+            except Exception as e:
+                tk.Label(inner_tracks_frame, text=f"MKV dosyası okunamadı: {e}",
+                         bg=COLORS["bg_deep"], fg=COLORS["accent"], font=("Segoe UI", 9)).pack(pady=20)
+
+        def browse_mkv():
+            nonlocal selected_files
+            files = filedialog.askopenfilenames(
+                title="MKV Dosyası veya Dosyaları Seçin",
+                filetypes=[("MKV Video Dosyaları", "*.mkv")]
+            )
+            if files:
+                selected_files = list(files)
+                if len(selected_files) == 1:
+                    file_label_var.set(f"📄 {os.path.basename(selected_files[0])}")
+                else:
+                    file_label_var.set(f"📁 Toplam {len(selected_files)} adet MKV dosyası seçildi")
+                load_mkv_tracks()
+
+        tk.Button(file_card, text="📁 MKV Dosyası Seç", bg=COLORS["accent"], fg="white",
+                  font=("Segoe UI", 9, "bold"), relief="flat", cursor="hand2", padx=12, pady=4,
+                  command=browse_mkv).pack(side=tk.RIGHT)
+
+        load_mkv_tracks()
+
+        # Alt İşlem Butonları
+        bottom_frame = tk.Frame(dub_win, bg=COLORS["bg_surface"], padx=20, pady=15)
+        bottom_frame.pack(fill=tk.X, side=tk.BOTTOM)
+
+        def apply_default_audio():
+            if not selected_files:
+                messagebox.showwarning("Uyarı", "Lütfen en az bir MKV dosyası seçin.")
+                return
+            target_id = selected_audio_id.get()
+            if target_id < 0:
+                messagebox.showwarning("Uyarı", "Lütfen varsayılan yapmak istediğiniz ses izini seçin.")
+                return
+
+            success_count = 0
+            for fpath in selected_files:
+                try:
+                    if MkvTools.set_default_audio(fpath, target_id, mpropedit, mmerge):
+                        success_count += 1
+                except Exception as e:
+                    print(f"Hata ({fpath}): {e}")
+
+            if success_count > 0:
+                messagebox.showinfo("Başarılı 🎉", f"Toplam {success_count} MKV dosyasında varsayılan ses izi (dublaj) başarıyla güncellendi!")
+                load_mkv_tracks()
+            else:
+                messagebox.showerror("Hata", "Varsayılan ses izi güncellenirken bir hata oluştu.")
+
+        tk.Button(bottom_frame, text="💾  Varsayılan Ses İzini Güncelle", bg=COLORS["success"], fg="white",
+                  font=("Segoe UI", 10, "bold"), relief="flat", cursor="hand2", padx=18, pady=6,
+                  command=apply_default_audio).pack(side=tk.RIGHT)
+
+        tk.Button(bottom_frame, text="Kapat", bg=COLORS["bg_elevated"], fg=COLORS["text_secondary"],
+                  font=("Segoe UI", 10), relief="flat", cursor="hand2", padx=14, pady=6,
+                  command=dub_win.destroy).pack(side=tk.RIGHT, padx=8)
 
     def _show_subtitle_converter_gui(self):
         """Altyazı format dönüştürücü arayüzü."""
