@@ -30,8 +30,9 @@
   - **MKV Altyazı Çıkarıcı**: `.mkv` dosyalarının içerisindeki gömülü altyazıları tek tıkla `.srt` / `.ass` dosyası olarak dışarı kaydeder.
   - **MKV Dublaj & Ses İzi Değiştirici**: MKV videolarının varsayılan ses izini (Türkçe/Japonca/İngilizce) toplu veya tekli olarak değiştirir.
 
-- 🔄 **Altyazı Format Dönüştürücü**:
-  - Netflix/YouTube `.vtt` formatlarını veya `.ass` dosyalarını anında standart `.srt` ve `.ass` formatlarına dönüştürür.
+- 🔄 **Toplu Altyazı Format Dönüştürücü**:
+  - Çoklu altyazı dosyalarını veya tüm bir klasörü saniyeler içinde toplu olarak `.srt`, `.ass`, `.vtt` veya düz metin (`.txt`) formatlarına dönüştürür.
+
 
 - 🎨 **Modern & Şık Kullanıcı Arayüzü**:
   - Karanlık tema, özel karakter logosu, hızlı arama filtreleri ve masaüstü kısayolu oluşturma desteği.

@@ -877,6 +877,73 @@ class SubtitleConverter:
 
         return "\n".join(srt_blocks)
 
+    @staticmethod
+    def srt_to_vtt(srt_content):
+        """SRT içeriğini WebVTT (.vtt) formatına dönüştürür."""
+        parsed = SubtitleConverter.parse_srt(srt_content)
+        vtt_lines = ["WEBVTT", ""]
+        for start, end, text in parsed:
+            vtt_start = start.replace(',', '.')
+            vtt_end = end.replace(',', '.')
+            if vtt_start.count(':') == 1:
+                vtt_start = "00:" + vtt_start
+            if vtt_end.count(':') == 1:
+                vtt_end = "00:" + vtt_end
+            clean_text = re.sub(r'\{[^}]+\}', '', text)
+            vtt_lines.append(f"{vtt_start} --> {vtt_end}")
+            vtt_lines.append(clean_text)
+            vtt_lines.append("")
+        return "\n".join(vtt_lines)
+
+    @staticmethod
+    def srt_to_txt(srt_content, clean_tags=True):
+        """Zaman damgalarını ve etiketleri temizleyerek sadece konuşma metnini (.txt) çıkarır."""
+        parsed = SubtitleConverter.parse_srt(srt_content)
+        txt_lines = []
+        for start, end, text in parsed:
+            if clean_tags:
+                text = re.sub(r'<[^>]+>', '', text)
+                text = re.sub(r'\{[^}]+\}', '', text)
+            txt_lines.append(text.strip())
+        return "\n".join(txt_lines)
+
+    @staticmethod
+    def convert(content, src_ext, target_fmt, clean_tags=False):
+        """Herhangi bir altyazı içeriğini hedef formata (srt, ass, vtt, txt) dönüştürür."""
+        if not content or not content.strip():
+            return ""
+
+        src_ext = src_ext.lower().strip()
+        if not src_ext.startswith('.'):
+            src_ext = '.' + src_ext
+
+        # 1. Önce SRT formatına veya doğrudan ara formata çevir
+        if src_ext == ".vtt":
+            srt_mid = SubtitleConverter.vtt_to_srt(content)
+        elif src_ext in [".ass", ".ssa"]:
+            srt_mid = SubtitleConverter.ass_to_srt(content)
+        elif src_ext == ".srt":
+            srt_mid = content
+        else:
+            srt_mid = content
+
+        if clean_tags:
+            srt_mid = re.sub(r'<[^>]+>', '', srt_mid)
+
+        # 2. SRT ara formatından Hedef Formata çevir
+        target_fmt = target_fmt.lower().replace('.', '')
+        if target_fmt == "srt":
+            return srt_mid
+        elif target_fmt == "ass":
+            return SubtitleConverter.srt_to_ass(srt_mid)
+        elif target_fmt == "vtt":
+            return SubtitleConverter.srt_to_vtt(srt_mid)
+        elif target_fmt == "txt":
+            return SubtitleConverter.srt_to_txt(srt_mid, clean_tags=clean_tags)
+        else:
+            return srt_mid
+
+
 
 # ══════════════════════════════════════════════════════
 # MKV ARAÇLARI (ALTYAZI VE DUBLAJ/SES İZİ YÖNETİMİ)
@@ -2129,103 +2196,309 @@ class NollySubApp:
                   command=dub_win.destroy).pack(side=tk.RIGHT, padx=8)
 
     def _show_subtitle_converter_gui(self):
-        """Altyazı format dönüştürücü arayüzü."""
-        files = filedialog.askopenfilenames(
-            title="Dönüştürülecek Altyazı Dosyalarını Seçin",
-            filetypes=[("Altyazı Dosyaları", "*.vtt;*.srt;*.ass;*.txt")]
-        )
-        if not files:
-            return
-
+        """Toplu altyazı format dönüştürücü arayüzü (SRT, ASS, VTT, TXT)."""
         conv_win = tk.Toplevel(self.root)
-        conv_win.title("🔄 NollySub — Altyazı Format Dönüştürücü")
-        conv_win.geometry("520x360")
+        conv_win.title("🔄 NollySub — Toplu Altyazı Format Dönüştürücü")
+        conv_win.geometry("860x620")
+        conv_win.minsize(760, 520)
         conv_win.configure(bg=COLORS["bg_surface"])
         conv_win.transient(self.root)
+        conv_win.grab_set()
 
-        tk.Label(conv_win, text="🔄 Altyazı Format Dönüştürücü", bg=COLORS["bg_surface"],
-                 fg=COLORS["text_primary"], font=("Segoe UI", 13, "bold")).pack(anchor=tk.W, padx=20, pady=15)
+        # Üst Başlık
+        header_frame = tk.Frame(conv_win, bg=COLORS["bg_surface"], padx=20, pady=12)
+        header_frame.pack(fill=tk.X)
 
-        target_fmt = tk.StringVar(value="ass")
+        tk.Label(header_frame, text="🔄 Toplu Altyazı Format Dönüştürücü", bg=COLORS["bg_surface"],
+                 fg=COLORS["text_primary"], font=("Segoe UI", 13, "bold")).pack(anchor=tk.W)
+        tk.Label(header_frame, text="Birden fazla altyazı dosyasını veya bir klasördeki tüm altyazıları toplu olarak SRT, ASS, VTT veya TXT formatına dönüştürün.",
+                 bg=COLORS["bg_surface"], fg=COLORS["text_muted"], font=("Segoe UI", 9)).pack(anchor=tk.W, pady=(2, 0))
 
-        fmt_frame = tk.Frame(conv_win, bg=COLORS["bg_surface"])
-        fmt_frame.pack(fill=tk.X, padx=20, pady=10)
+        # Kontrol Butonları (Üst Ekleme / Silme Çubuğu)
+        ctrl_frame = tk.Frame(conv_win, bg=COLORS["bg_surface"], padx=20, pady=6)
+        ctrl_frame.pack(fill=tk.X)
 
-        tk.Label(fmt_frame, text="Hedef Format:", bg=COLORS["bg_surface"], fg=COLORS["text_secondary"]).pack(side=tk.LEFT)
+        queue_items = {}
 
-        tk.Radiobutton(fmt_frame, text="ASS (.ass)", variable=target_fmt, value="ass",
-                       bg=COLORS["bg_surface"], fg="white", selectcolor=COLORS["bg_deep"]).pack(side=tk.LEFT, padx=10)
-        tk.Radiobutton(fmt_frame, text="SRT (.srt)", variable=target_fmt, value="srt",
-                       bg=COLORS["bg_surface"], fg="white", selectcolor=COLORS["bg_deep"]).pack(side=tk.LEFT, padx=10)
+        def update_tree_summary():
+            count = len(queue_items)
+            summary_label.config(text=f"Kuyrukta {count} adet dosya var")
 
-        def start_conversion():
-            fmt = target_fmt.get()
-            converted = []
-            failed = []
+        def add_files(file_list=None):
+            if not file_list:
+                file_list = filedialog.askopenfilenames(
+                    title="Altyazı Dosyaları Seçin",
+                    filetypes=[("Altyazı Dosyaları", "*.vtt;*.srt;*.ass;*.ssa;*.txt;*.sub")]
+                )
+            if not file_list:
+                return
 
-            for fpath in files:
+            existing_paths = set(queue_items.values())
+            for fpath in file_list:
+                norm_p = os.path.abspath(fpath)
+                if norm_p not in existing_paths:
+                    iid = f"item_{len(queue_items) + 1}_{hash(norm_p) & 0xfffffff}"
+                    queue_items[iid] = norm_p
+                    existing_paths.add(norm_p)
+
+                    fname = os.path.basename(norm_p)
+                    ext = (os.path.splitext(norm_p)[1].upper() or ".SRT")
+                    folder = os.path.dirname(norm_p)
+
+                    tree.insert("", "end", iid=iid, values=(
+                        "⏳ Bekliyor",
+                        fname,
+                        ext,
+                        target_fmt_var.get().upper(),
+                        folder
+                    ))
+            update_tree_summary()
+
+        def add_folder():
+            folder = filedialog.askdirectory(title="Altyazı Dosyalarını İçeren Klasörü Seçin")
+            if not folder:
+                return
+
+            sub_exts = {".srt", ".ass", ".ssa", ".vtt", ".txt", ".sub"}
+            found_files = []
+            for root, dirs, files in os.walk(folder):
+                for f in files:
+                    ext = os.path.splitext(f)[1].lower()
+                    if ext in sub_exts:
+                        found_files.append(os.path.join(root, f))
+
+            if found_files:
+                add_files(found_files)
+            else:
+                messagebox.showinfo("Bilgi", "Seçilen klasörde uygun altyazı dosyası bulunamadı.")
+
+        def remove_selected():
+            sel = tree.selection()
+            if not sel:
+                return
+            for iid in sel:
+                if iid in queue_items:
+                    del queue_items[iid]
+                tree.delete(iid)
+            update_tree_summary()
+
+        def clear_all():
+            queue_items.clear()
+            for child in tree.get_children():
+                tree.delete(child)
+            update_tree_summary()
+
+        tk.Button(ctrl_frame, text="➕ Dosya(lar) Ekle", bg=COLORS["accent"], fg="white",
+                  font=("Segoe UI", 9, "bold"), relief="flat", cursor="hand2", padx=12, pady=4,
+                  command=add_files).pack(side=tk.LEFT, padx=(0, 6))
+
+        tk.Button(ctrl_frame, text="📁 Klasör Ekle", bg=COLORS["bg_elevated"], fg=COLORS["text_primary"],
+                  font=("Segoe UI", 9, "bold"), relief="flat", cursor="hand2", padx=12, pady=4,
+                  command=add_folder).pack(side=tk.LEFT, padx=6)
+
+        tk.Button(ctrl_frame, text="🗑️ Seçileni Çıkar", bg=COLORS["bg_elevated"], fg=COLORS["text_secondary"],
+                  font=("Segoe UI", 9), relief="flat", cursor="hand2", padx=10, pady=4,
+                  command=remove_selected).pack(side=tk.LEFT, padx=6)
+
+        tk.Button(ctrl_frame, text="🧹 Listeyi Temizle", bg=COLORS["bg_elevated"], fg=COLORS["text_secondary"],
+                  font=("Segoe UI", 9), relief="flat", cursor="hand2", padx=10, pady=4,
+                  command=clear_all).pack(side=tk.LEFT, padx=6)
+
+        summary_label = tk.Label(ctrl_frame, text="Kuyrukta 0 adet dosya var", bg=COLORS["bg_surface"],
+                                 fg=COLORS["text_muted"], font=("Segoe UI", 9))
+        summary_label.pack(side=tk.RIGHT)
+
+        # Kuyruk Tablosu
+        tree_container = tk.Frame(conv_win, bg=COLORS["bg_deep"], highlightthickness=1, highlightbackground=COLORS["border"])
+        tree_container.pack(fill=tk.BOTH, expand=True, padx=20, pady=6)
+
+        columns = ("status", "filename", "src_fmt", "target_fmt", "folder")
+        tree = ttk.Treeview(tree_container, columns=columns, show="headings", style="Dark.Treeview", selectmode="extended")
+
+        tree.heading("status", text="Durum", anchor=tk.CENTER)
+        tree.heading("filename", text="Dosya Adı", anchor=tk.W)
+        tree.heading("src_fmt", text="Kaynak Format", anchor=tk.CENTER)
+        tree.heading("target_fmt", text="Hedef Format", anchor=tk.CENTER)
+        tree.heading("folder", text="Klasör Konumu", anchor=tk.W)
+
+        tree.column("status", width=110, minwidth=90, stretch=False, anchor=tk.CENTER)
+        tree.column("filename", width=220, minwidth=140, stretch=True, anchor=tk.W)
+        tree.column("src_fmt", width=100, minwidth=80, stretch=False, anchor=tk.CENTER)
+        tree.column("target_fmt", width=100, minwidth=80, stretch=False, anchor=tk.CENTER)
+        tree.column("folder", width=280, minwidth=180, stretch=True, anchor=tk.W)
+
+        scrollbar = ttk.Scrollbar(tree_container, orient=tk.VERTICAL, command=tree.yview, style="Dark.Vertical.TScrollbar")
+        tree.configure(yscrollcommand=scrollbar.set)
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Seçenekler Kartı (Format ve Çıktı Konumu)
+        opts_card = tk.Frame(conv_win, bg=COLORS["bg_elevated"], padx=16, pady=10, highlightthickness=1, highlightbackground=COLORS["border"])
+        opts_card.pack(fill=tk.X, padx=20, pady=6)
+
+        # Row 1: Hedef Format
+        row1 = tk.Frame(opts_card, bg=COLORS["bg_elevated"])
+        row1.pack(fill=tk.X, pady=(0, 6))
+
+        tk.Label(row1, text="🎯 Hedef Format:", bg=COLORS["bg_elevated"], fg=COLORS["text_primary"],
+                 font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT, padx=(0, 10))
+
+        target_fmt_var = tk.StringVar(value="srt")
+
+        def on_fmt_change():
+            tgt = target_fmt_var.get().upper()
+            for iid in tree.get_children():
+                vals = list(tree.item(iid, "values"))
+                vals[3] = tgt
+                tree.item(iid, values=vals)
+
+        for fmt_val, fmt_name in [("srt", "SRT (.srt)"), ("ass", "ASS (.ass)"), ("vtt", "WebVTT (.vtt)"), ("txt", "Düz Metin (.txt)")]:
+            rb = tk.Radiobutton(row1, text=fmt_name, variable=target_fmt_var, value=fmt_val,
+                                bg=COLORS["bg_elevated"], fg="white", selectcolor=COLORS["bg_deep"],
+                                activebackground=COLORS["bg_elevated"], command=on_fmt_change)
+            rb.pack(side=tk.LEFT, padx=8)
+
+        clean_tags_var = tk.BooleanVar(value=False)
+        cb_clean = tk.Checkbutton(row1, text="✂️ HTML/Stil etiketlerini temizle", variable=clean_tags_var,
+                                  bg=COLORS["bg_elevated"], fg=COLORS["text_secondary"], selectcolor=COLORS["bg_deep"],
+                                  activebackground=COLORS["bg_elevated"])
+        cb_clean.pack(side=tk.RIGHT)
+
+        # Row 2: Çıktı Klasörü
+        row2 = tk.Frame(opts_card, bg=COLORS["bg_elevated"])
+        row2.pack(fill=tk.X)
+
+        tk.Label(row2, text="📁 Çıktı Konumu:", bg=COLORS["bg_elevated"], fg=COLORS["text_primary"],
+                 font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT, padx=(0, 10))
+
+        out_mode_var = tk.StringVar(value="same")
+        custom_dir_var = tk.StringVar(value="")
+
+        rb_same = tk.Radiobutton(row2, text="Orijinal Klasör", variable=out_mode_var, value="same",
+                                 bg=COLORS["bg_elevated"], fg="white", selectcolor=COLORS["bg_deep"],
+                                 activebackground=COLORS["bg_elevated"])
+        rb_same.pack(side=tk.LEFT, padx=4)
+
+        rb_custom = tk.Radiobutton(row2, text="Özel Klasör:", variable=out_mode_var, value="custom",
+                                   bg=COLORS["bg_elevated"], fg="white", selectcolor=COLORS["bg_deep"],
+                                   activebackground=COLORS["bg_elevated"])
+        rb_custom.pack(side=tk.LEFT, padx=(12, 4))
+
+        custom_dir_entry = tk.Entry(row2, textvariable=custom_dir_var, bg=COLORS["bg_input"],
+                                    fg=COLORS["text_primary"], font=("Segoe UI", 9), relief="flat",
+                                    highlightthickness=1, highlightbackground=COLORS["border"], width=30)
+        custom_dir_entry.pack(side=tk.LEFT, padx=4, ipady=2)
+
+        def browse_custom_out():
+            out_mode_var.set("custom")
+            d = filedialog.askdirectory(title="Dönüştürülen Altyazıların Kaydedileceği Klasörü Seçin")
+            if d:
+                custom_dir_var.set(d)
+
+        btn_browse_out = tk.Button(row2, text="📂 Gözat...", bg=COLORS["bg_surface"], fg=COLORS["text_primary"],
+                                   font=("Segoe UI", 8), relief="flat", cursor="hand2", padx=8, pady=2,
+                                   command=browse_custom_out)
+        btn_browse_out.pack(side=tk.LEFT, padx=4)
+
+        # Alt Butonlar ve İlerleme
+        bottom_frame = tk.Frame(conv_win, bg=COLORS["bg_surface"], padx=20, pady=12)
+        bottom_frame.pack(fill=tk.X, side=tk.BOTTOM)
+
+        status_lbl = tk.Label(bottom_frame, text="Hazır", bg=COLORS["bg_surface"], fg=COLORS["text_muted"], font=("Segoe UI", 9))
+        status_lbl.pack(side=tk.LEFT)
+
+        conv_progress = ttk.Progressbar(bottom_frame, mode="determinate", length=160, style="Custom.Horizontal.TProgressbar")
+
+        def start_batch_conversion():
+            if not queue_items:
+                messagebox.showwarning("Uyarı", "Lütfen dönüştürülecek altyazı dosyalarını listeye ekleyin.")
+                return
+
+            target_fmt = target_fmt_var.get().lower()
+            out_mode = out_mode_var.get()
+            custom_dir = custom_dir_var.get().strip()
+            clean_tags = clean_tags_var.get()
+
+            if out_mode == "custom" and not custom_dir:
+                messagebox.showwarning("Uyarı", "Lütfen bir çıktı klasörü seçin veya 'Orijinal Klasör' seçeneğini belirleyin.")
+                return
+
+            btn_start.config(state=tk.DISABLED)
+            conv_progress.pack(side=tk.LEFT, padx=10)
+            conv_progress["maximum"] = len(queue_items)
+            conv_progress["value"] = 0
+
+            converted_files = []
+            failed_items = []
+
+            for idx, (iid, fpath) in enumerate(list(queue_items.items()), 1):
+                conv_progress["value"] = idx
+                status_lbl.config(text=f"Dönüştürülüyor ({idx}/{len(queue_items)}): {os.path.basename(fpath)}")
+                conv_win.update_idletasks()
+
                 try:
                     content = read_text_file(fpath)
                     if not content or not content.strip():
-                        failed.append(f"{os.path.basename(fpath)}: Dosya boş veya okunamadı.")
-                        continue
+                        raise Exception("Dosya içeriği boş veya okunamadı.")
 
                     base, ext = os.path.splitext(fpath)
-                    ext = ext.lower()
+                    res_text = SubtitleConverter.convert(content, ext, target_fmt, clean_tags=clean_tags)
 
-                    if fmt == "srt":
-                        if ext == ".vtt":
-                            res_text = SubtitleConverter.vtt_to_srt(content)
-                        elif ext == ".ass":
-                            res_text = SubtitleConverter.ass_to_srt(content)
-                        else:
-                            res_text = content
-                        out_ext = ".srt"
-
-                    elif fmt == "ass":
-                        if ext == ".srt":
-                            res_text = SubtitleConverter.srt_to_ass(content)
-                        elif ext == ".vtt":
-                            srt_mid = SubtitleConverter.vtt_to_srt(content)
-                            res_text = SubtitleConverter.srt_to_ass(srt_mid)
-                        elif ext == ".ass":
-                            res_text = content
-                        else:
-                            res_text = SubtitleConverter.srt_to_ass(content)
-                        out_ext = ".ass"
+                    out_ext = f".{target_fmt}"
+                    if out_mode == "custom" and custom_dir:
+                        out_dir = custom_dir
+                        os.makedirs(out_dir, exist_ok=True)
                     else:
-                        continue
+                        out_dir = os.path.dirname(fpath)
 
-                    if ext == out_ext:
-                        out_path = base + f".converted{out_ext}"
+                    filename_stem = os.path.splitext(os.path.basename(fpath))[0]
+                    if ext.lower() == out_ext.lower():
+                        out_file = os.path.join(out_dir, f"{filename_stem}.converted{out_ext}")
                     else:
-                        out_path = base + out_ext
+                        out_file = os.path.join(out_dir, f"{filename_stem}{out_ext}")
 
-                    with open(out_path, "w", encoding="utf-8-sig") as f:
+                    with open(out_file, "w", encoding="utf-8-sig") as f:
                         f.write(res_text)
-                    converted.append(out_path)
+
+                    converted_files.append(out_file)
+
+                    vals = list(tree.item(iid, "values"))
+                    vals[0] = "✅ Dönüştürüldü"
+                    tree.item(iid, values=vals)
 
                 except Exception as e:
-                    failed.append(f"{os.path.basename(fpath)}: {e}")
+                    failed_items.append(f"{os.path.basename(fpath)}: {e}")
+                    vals = list(tree.item(iid, "values"))
+                    vals[0] = "❌ Hata"
+                    tree.item(iid, values=vals)
 
-            if converted:
-                msg = f"{len(converted)} altyazı dosyası başarıyla {fmt.upper()} formatına dönüştürüldü!"
-                if failed:
-                    msg += f"\n\nHatalar:\n" + "\n".join(failed)
+            conv_progress.pack_forget()
+            btn_start.config(state=tk.NORMAL)
+            status_lbl.config(text=f"İşlem Tamamlandı: {len(converted_files)} başarılı, {len(failed_items)} hata", fg=COLORS["success"])
 
-                ans = messagebox.askyesno("Dönüştürme Tamamlandı 🎉", msg)
-                if ans and converted:
-                    try:
-                        os.startfile(os.path.dirname(converted[0]))
-                    except Exception:
-                        pass
-                conv_win.destroy()
+            if converted_files:
+                msg = f"Toplam {len(converted_files)} adet altyazı dosyası başarıyla .{target_fmt.upper()} formatına dönüştürüldü!"
+                if failed_items:
+                    msg += f"\n\nHata Alınan Dosyalar ({len(failed_items)}):\n" + "\n".join(failed_items[:5])
+
+                ans = messagebox.askyesno("Dönüştürme Tamamlandı 🎉", f"{msg}\n\nÇıktı klasörü açılsın mı?")
+                if ans:
+                    out_target = os.path.dirname(converted_files[0])
+                    if os.path.exists(out_target):
+                        os.startfile(out_target)
             else:
-                messagebox.showerror("Hata", f"Dönüştürme başarısız oldu:\n\n" + "\n".join(failed))
+                messagebox.showerror("Dönüştürme Başarısız", "Hiçbir dosya dönüştürülemedi:\n\n" + "\n".join(failed_items))
 
-        tk.Button(conv_win, text="⚡  Dönüştürmeyi Başlat", bg=COLORS["accent"], fg="white",
-                  font=("Segoe UI", 11, "bold"), relief="flat", cursor="hand2", padx=24, pady=6,
-                  command=start_conversion).pack(pady=30)
+        btn_start = tk.Button(bottom_frame, text="⚡  Toplu Dönüştürmeyi Başlat", bg=COLORS["accent"], fg="white",
+                              font=("Segoe UI", 10, "bold"), relief="flat", cursor="hand2", padx=18, pady=6,
+                              activebackground=COLORS["accent_hover"], activeforeground="white",
+                              command=start_batch_conversion)
+        btn_start.pack(side=tk.RIGHT, padx=(8, 0))
+
+        tk.Button(bottom_frame, text="Kapat", bg=COLORS["bg_elevated"], fg=COLORS["text_secondary"],
+                  font=("Segoe UI", 10), relief="flat", cursor="hand2", padx=14, pady=6,
+                  command=conv_win.destroy).pack(side=tk.RIGHT)
+
 
     def _create_desktop_shortcut(self):
         """Masaüstünde NollySub kısayolu (.lnk) oluşturur."""
