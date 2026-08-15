@@ -657,98 +657,155 @@ class SubtitleConverter:
 
     @staticmethod
     def parse_srt(srt_content):
-        """SRT içeriğini detaylı ve esnek şekilde ayrıştırır."""
-        if not srt_content:
+        """SRT içeriğini detaylı, esnek ve hatasız bir şekilde ayrıştırır."""
+        if not srt_content or not srt_content.strip():
             return []
+
         if srt_content.startswith('\ufeff'):
             srt_content = srt_content[1:]
         srt_content = srt_content.replace('\r\n', '\n').replace('\r', '\n')
 
-        pattern = re.compile(
-            r'(\d{1,2}:\d{2}:\d{2}[\.,]\d{1,3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}[\.,]\d{1,3})[^\n]*'
+        # Esnek zaman damgası deseni (00:00:01,000 / 0:00:01.00 / 01:23,456 / 4 basamaklı ms vb.)
+        timestamp_re = re.compile(
+            r'(?:(\d{1,2}):)?(\d{1,2}):(\d{2})(?:[\.,](\d{1,4}))?\s*-->\s*(?:(\d{1,2}):)?(\d{1,2}):(\d{2})(?:[\.,](\d{1,4}))?'
         )
 
-        matches = list(pattern.finditer(srt_content))
+        lines = srt_content.split('\n')
         subtitles = []
 
-        for i, match in enumerate(matches):
-            start_time = match.group(1)
-            end_time = match.group(2)
-            text_start = match.end()
+        current_start = None
+        current_end = None
+        current_text_lines = []
 
-            if i + 1 < len(matches):
-                text_end = matches[i + 1].start()
-                raw_block = srt_content[text_start:text_end]
-                raw_block = re.sub(r'\n\s*\d+\s*$', '', raw_block)
+        def format_timestamp(h, m, s, ms):
+            h_str = f"{int(h):02d}" if h is not None else "00"
+            m_str = f"{int(m):02d}" if m is not None else "00"
+            s_str = f"{int(s):02d}" if s is not None else "00"
+            ms_3 = (ms + "000")[:3] if ms is not None else "000"
+            return f"{h_str}:{m_str}:{s_str},{ms_3}"
+
+        i = 0
+        n = len(lines)
+        while i < n:
+            line = lines[i]
+            m = timestamp_re.search(line)
+            if m:
+                if current_start and current_end:
+                    if current_text_lines and current_text_lines[-1].strip().isdigit():
+                        current_text_lines.pop()
+                    text = "\n".join(current_text_lines).strip()
+                    if text:
+                        subtitles.append((current_start, current_end, text))
+
+                g = m.groups()
+                current_start = format_timestamp(g[0], g[1], g[2], g[3])
+                current_end = format_timestamp(g[4], g[5], g[6], g[7])
+                current_text_lines = []
+                i += 1
             else:
-                raw_block = srt_content[text_start:]
-                raw_block = re.sub(r'\n\s*\d+\s*$', '', raw_block)
+                if current_start is not None:
+                    current_text_lines.append(line)
+                i += 1
 
-            lines = [l.strip() for l in raw_block.split('\n')]
-            while lines and not lines[0]:
-                lines.pop(0)
-            while lines and not lines[-1]:
-                lines.pop()
-
-            text = "\n".join(lines)
+        if current_start and current_end:
+            if current_text_lines and current_text_lines[-1].strip().isdigit():
+                current_text_lines.pop()
+            text = "\n".join(current_text_lines).strip()
             if text:
-                subtitles.append((start_time, end_time, text))
+                subtitles.append((current_start, current_end, text))
 
         return subtitles
 
     @staticmethod
     def fmt_ass_time(t_str):
         """Zaman damgasını ASS formatına dönüştürür (H:MM:SS.cc)."""
+        if not t_str:
+            return "0:00:00.00"
         t_str = t_str.replace(',', '.')
         parts = t_str.split(':')
-        if len(parts) == 3:
-            h, m, s = parts
-        elif len(parts) == 2:
-            h = "0"
-            m, s = parts
-        else:
+        try:
+            if len(parts) == 3:
+                h, m, s = parts
+            elif len(parts) == 2:
+                h = "0"
+                m, s = parts
+            else:
+                return "0:00:00.00"
+
+            sec_parts = s.split('.')
+            sec = sec_parts[0]
+            ms_raw = sec_parts[1] if len(sec_parts) > 1 else "0"
+
+            h = re.sub(r'\D', '', h) or "0"
+            m = re.sub(r'\D', '', m) or "0"
+            sec = re.sub(r'\D', '', sec) or "0"
+            ms_raw = re.sub(r'\D', '', ms_raw) or "0"
+
+            ms_3 = (ms_raw + "000")[:3]
+            cs = min(99, int(ms_3) // 10)
+
+            return f"{int(h)}:{int(m):02d}:{int(sec):02d}.{cs:02d}"
+        except Exception:
             return "0:00:00.00"
-
-        sec_parts = s.split('.')
-        sec = sec_parts[0]
-        ms_raw = sec_parts[1] if len(sec_parts) > 1 else "0"
-
-        ms_3 = (ms_raw + "000")[:3]
-        cs = min(99, int(ms_3) // 10)
-
-        return f"{int(h)}:{int(m):02d}:{int(sec):02d}.{cs:02d}"
 
     @staticmethod
     def fmt_srt_time(ass_t_str):
         """ASS zaman damgasını SRT formatına dönüştürür (HH:MM:SS,mmm)."""
-        parts = ass_t_str.strip().split(':')
-        if len(parts) == 3:
-            h, m, s = parts
-            h = f"{int(h):02d}"
-        elif len(parts) == 2:
-            h = "00"
-            m, s = parts
-        else:
+        if not ass_t_str:
             return "00:00:00,000"
+        ass_t_str = ass_t_str.replace('.', ',')
+        parts = ass_t_str.strip().split(':')
+        try:
+            if len(parts) == 3:
+                h, m, s = parts
+            elif len(parts) == 2:
+                h = "00"
+                m, s = parts
+            else:
+                return "00:00:00,000"
 
-        sec_parts = s.split('.')
-        sec = f"{int(sec_parts[0]):02d}"
-        cs = sec_parts[1] if len(sec_parts) > 1 else "0"
-        ms = (cs + "00")[:2] + "0"
-        return f"{h}:{int(m):02d}:{sec},{ms}"
+            sec_parts = s.split(',')
+            sec = sec_parts[0]
+            cs_raw = sec_parts[1] if len(sec_parts) > 1 else "0"
+
+            h_num = int(re.sub(r'\D', '', h) or 0)
+            m_num = int(re.sub(r'\D', '', m) or 0)
+            sec_num = int(re.sub(r'\D', '', sec) or 0)
+            cs_clean = re.sub(r'\D', '', cs_raw) or "0"
+
+            ms_3 = (cs_clean + "00")[:2] + "0" if len(cs_clean) <= 2 else (cs_clean + "000")[:3]
+
+            return f"{h_num:02d}:{m_num:02d}:{sec_num:02d},{ms_3}"
+        except Exception:
+            return "00:00:00,000"
 
     @staticmethod
     def convert_html_to_ass_tags(text):
         """HTML etiketlerini ASS etiketlerine çevirir."""
+        if not text:
+            return ""
         text = re.sub(r'<i>(.*?)</i>', r'{\\i1}\1{\\i0}', text, flags=re.IGNORECASE | re.DOTALL)
         text = re.sub(r'<b>(.*?)</b>', r'{\\b1}\1{\\b0}', text, flags=re.IGNORECASE | re.DOTALL)
         text = re.sub(r'<u>(.*?)</u>', r'{\\u1}\1{\\u0}', text, flags=re.IGNORECASE | re.DOTALL)
+
+        def replace_font(match):
+            color_attr = match.group(1).strip('"\'')
+            content = match.group(2)
+            if color_attr.startswith('#') and len(color_attr) == 7:
+                r, g, b = color_attr[1:3], color_attr[3:5], color_attr[5:7]
+                ass_color = f"&H{b}{g}{r}&"
+                return f"{{\\c{ass_color}}}{content}{{\\c}}"
+            return content
+
+        text = re.sub(r'<font\s+color=([^>]+)>(.*?)</font>', replace_font, text, flags=re.IGNORECASE | re.DOTALL)
         text = re.sub(r'<[^>]+>', '', text)
         return text
 
     @staticmethod
     def convert_ass_tags_to_html(text):
         """ASS etiketlerini HTML / temiz metne çevirir."""
+        if not text:
+            return ""
         text = re.sub(r'\{\\i1\}(.*?)\{\\i0\}', r'<i>\1</i>', text)
         text = re.sub(r'\{\\b1\}(.*?)\{\\b0\}', r'<b>\1</b>', text)
         text = re.sub(r'\{\\u1\}(.*?)\{\\u0\}', r'<u>\1</u>', text)
@@ -764,7 +821,7 @@ class SubtitleConverter:
         vtt_content = vtt_content.replace('\r\n', '\n').replace('\r', '\n')
 
         pattern = re.compile(
-            r'(\d{1,2}:)?(\d{2}:\d{2}[\.,]\d{3})\s*-->\s*(\d{1,2}:)?(\d{2}:\d{2}[\.,]\d{3})[^\n]*'
+            r'(?:(\d{1,2}):)?(\d{2}:\d{2}[\.,]\d{2,4})\s*-->\s*(?:(\d{1,2}):)?(\d{2}:\d{2}[\.,]\d{2,4})'
         )
         srt_lines = []
         idx = 1
@@ -773,39 +830,36 @@ class SubtitleConverter:
         i = 0
         while i < len(lines):
             line = lines[i].strip()
-            if line.startswith("WEBVTT") or line.startswith("NOTE") or line.startswith("STYLE"):
+            if line.startswith("WEBVTT") or line.startswith("NOTE") or line.startswith("STYLE") or line.startswith("REGION"):
                 i += 1
                 while i < len(lines) and lines[i].strip():
                     i += 1
                 continue
 
-            if "-->" in line:
-                m = pattern.search(line)
-                if m:
-                    t_line = line.split("-->")
-                    start_str = t_line[0].strip().replace('.', ',')
-                    end_str = t_line[1].split()[0].strip().replace('.', ',')
-                    if start_str.count(':') == 1:
-                        start_str = "00:" + start_str
-                    if end_str.count(':') == 1:
-                        end_str = "00:" + end_str
+            m = pattern.search(line)
+            if m:
+                t_line = line.split("-->")
+                start_str = t_line[0].strip().replace('.', ',')
+                end_str = t_line[1].split()[0].strip().replace('.', ',')
+                if start_str.count(':') == 1:
+                    start_str = "00:" + start_str
+                if end_str.count(':') == 1:
+                    end_str = "00:" + end_str
 
-                    text_lines = []
+                text_lines = []
+                i += 1
+                while i < len(lines) and lines[i].strip() and not lines[i].strip().isdigit() and "-->" not in lines[i]:
+                    t_l = re.sub(r'<[^>]+>', '', lines[i].strip())
+                    if t_l:
+                        text_lines.append(t_l)
                     i += 1
-                    while i < len(lines) and lines[i].strip() and not lines[i].strip().isdigit() and "-->" not in lines[i]:
-                        t_l = re.sub(r'<[^>]+>', '', lines[i].strip())
-                        if t_l:
-                            text_lines.append(t_l)
-                        i += 1
 
-                    if text_lines:
-                        srt_lines.append(str(idx))
-                        srt_lines.append(f"{start_str} --> {end_str}")
-                        srt_lines.extend(text_lines)
-                        srt_lines.append("")
-                        idx += 1
-                else:
-                    i += 1
+                if text_lines:
+                    srt_lines.append(str(idx))
+                    srt_lines.append(f"{start_str} --> {end_str}")
+                    srt_lines.extend(text_lines)
+                    srt_lines.append("")
+                    idx += 1
             else:
                 i += 1
 
@@ -820,10 +874,12 @@ class SubtitleConverter:
             "ScriptType: v4.00+\n"
             "WrapStyle: 0\n"
             "ScaledBorderAndShadow: yes\n"
-            "YCbCr Matrix: None\n\n"
+            "YCbCr Matrix: None\n"
+            "PlayResX: 1920\n"
+            "PlayResY: 1080\n\n"
             "[V4+ Styles]\n"
             "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
-            "Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,2,2,10,10,10,1\n\n"
+            "Style: Default,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,2,2,20,20,20,1\n\n"
             "[Events]\n"
             "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
         )
@@ -850,6 +906,9 @@ class SubtitleConverter:
         events = []
         in_events = False
         format_headers = []
+        start_idx = 1
+        end_idx = 2
+        text_idx = 9
 
         for line in lines:
             line_str = line.strip()
@@ -859,12 +918,19 @@ class SubtitleConverter:
             if in_events:
                 if line_str.startswith("Format:"):
                     format_headers = [h.strip().lower() for h in line_str[7:].split(",")]
+                    if "start" in format_headers:
+                        start_idx = format_headers.index("start")
+                    if "end" in format_headers:
+                        end_idx = format_headers.index("end")
+                    if "text" in format_headers:
+                        text_idx = format_headers.index("text")
                 elif line_str.startswith("Dialogue:"):
-                    parts = line_str[9:].split(",", len(format_headers) - 1 if format_headers else 9)
-                    if len(parts) >= 9:
-                        start_t = parts[1].strip()
-                        end_t = parts[2].strip()
-                        raw_txt = parts[-1].strip()
+                    max_split = len(format_headers) - 1 if format_headers else 9
+                    parts = line_str[9:].split(",", max_split)
+                    if len(parts) > max(start_idx, end_idx, text_idx):
+                        start_t = parts[start_idx].strip()
+                        end_t = parts[end_idx].strip()
+                        raw_txt = parts[text_idx].strip()
                         raw_txt = raw_txt.replace("\\N", "\n").replace("\\n", "\n")
                         clean_txt = SubtitleConverter.convert_ass_tags_to_html(raw_txt)
                         events.append((start_t, end_t, clean_txt))
@@ -913,26 +979,39 @@ class SubtitleConverter:
         if not content or not content.strip():
             return ""
 
-        src_ext = src_ext.lower().strip()
-        if not src_ext.startswith('.'):
+        src_ext = (src_ext or "").lower().strip()
+        if src_ext and not src_ext.startswith('.'):
             src_ext = '.' + src_ext
 
-        # 1. Önce SRT formatına veya doğrudan ara formata çevir
-        if src_ext == ".vtt":
+        is_ass = "[Script Info]" in content or "Dialogue:" in content
+        is_vtt = content.strip().startswith("WEBVTT")
+
+        if is_vtt or src_ext == ".vtt":
             srt_mid = SubtitleConverter.vtt_to_srt(content)
-        elif src_ext in [".ass", ".ssa"]:
+        elif is_ass or src_ext in [".ass", ".ssa"]:
             srt_mid = SubtitleConverter.ass_to_srt(content)
-        elif src_ext == ".srt":
-            srt_mid = content
         else:
             srt_mid = content
+
+        parsed = SubtitleConverter.parse_srt(srt_mid)
+        if not parsed:
+            if "[Script Info]" in content or "Dialogue:" in content:
+                srt_mid = SubtitleConverter.ass_to_srt(content)
+                parsed = SubtitleConverter.parse_srt(srt_mid)
+            elif "WEBVTT" in content or "-->" in content:
+                srt_mid = SubtitleConverter.vtt_to_srt(content)
+                parsed = SubtitleConverter.parse_srt(srt_mid)
 
         if clean_tags:
             srt_mid = re.sub(r'<[^>]+>', '', srt_mid)
 
-        # 2. SRT ara formatından Hedef Formata çevir
-        target_fmt = target_fmt.lower().replace('.', '')
+        target_fmt = target_fmt.lower().replace('.', '').strip()
         if target_fmt == "srt":
+            if parsed:
+                blocks = []
+                for idx, (start, end, txt) in enumerate(parsed, 1):
+                    blocks.append(f"{idx}\n{start} --> {end}\n{txt}\n")
+                return "\n".join(blocks)
             return srt_mid
         elif target_fmt == "ass":
             return SubtitleConverter.srt_to_ass(srt_mid)
