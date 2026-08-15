@@ -1205,10 +1205,10 @@ class NollySubApp:
                                   bg=COLORS["bg_elevated"], fg=COLORS["text_primary"],
                                   activebackground=COLORS["accent"], activeforeground="white",
                                   font=("Segoe UI", 10))
-        self.tools_menu.add_command(label="🎬  MKV Altyazı Çıkar", command=self._extract_subtitles_from_mkv_gui)
+        self.tools_menu.add_command(label="🎬  MKV Altyazı Çıkar & Dönüştür", command=self._extract_subtitles_from_mkv_gui)
         self.tools_menu.add_command(label="🎙️  MKV Dublaj Değiştir", command=self._show_mkv_dub_changer_gui)
         self.tools_menu.add_separator()
-        self.tools_menu.add_command(label="🔄  Altyazı Dönüştür (.srt / .ass)", command=self._show_subtitle_converter_gui)
+        self.tools_menu.add_command(label="🔄  Toplu Altyazı Dönüştür (SRT / ASS / VTT / TXT)", command=self._show_subtitle_converter_gui)
         self.tools_menu.add_command(label="📌  Masaüstü Kısayolu Oluştur", command=self._create_desktop_shortcut)
 
         def _popup_tools_menu():
@@ -1957,8 +1957,23 @@ class NollySubApp:
         tk.Label(quick_frame, text="💡 İpucu: Çift tıklayarak veya Boşluk tuşu ile seçimi değiştirebilirsiniz.",
                  bg=COLORS["bg_surface"], fg=COLORS["text_muted"], font=("Segoe UI", 9)).pack(side=tk.RIGHT)
 
+        # Dönüştürme Seçenekleri Kartı
+        fmt_card = tk.Frame(sub_win, bg=COLORS["bg_elevated"], padx=16, pady=8, highlightthickness=1, highlightbackground=COLORS["border"])
+        fmt_card.pack(fill=tk.X, padx=20, pady=(4, 0))
+
+        tk.Label(fmt_card, text="🎯 Hedef Format:", bg=COLORS["bg_elevated"],
+                 fg=COLORS["text_primary"], font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT, padx=(0, 8))
+
+        mkv_target_fmt = tk.StringVar(value="srt")
+
+        for fmt_val, fmt_lbl in [("srt", "SRT (.srt)"), ("ass", "ASS (.ass)"), ("txt", "Düz Metin (.txt)"), ("original", "Orijinal Format (MKV İçindeki)")]:
+            rb = tk.Radiobutton(fmt_card, text=fmt_lbl, variable=mkv_target_fmt, value=fmt_val,
+                                bg=COLORS["bg_elevated"], fg="white", selectcolor=COLORS["bg_deep"],
+                                activebackground=COLORS["bg_elevated"])
+            rb.pack(side=tk.LEFT, padx=6)
+
         # Alt Butonlar
-        bottom_frame = tk.Frame(sub_win, bg=COLORS["bg_surface"], padx=20, pady=15)
+        bottom_frame = tk.Frame(sub_win, bg=COLORS["bg_surface"], padx=20, pady=12)
         bottom_frame.pack(fill=tk.X, side=tk.BOTTOM)
 
         def start_extraction():
@@ -1971,8 +1986,10 @@ class NollySubApp:
             if not out_dir:
                 return
 
+            target_fmt = mkv_target_fmt.get().lower()
             extracted_files = []
             failed_count = 0
+
             for item in to_extract:
                 try:
                     fpath = item["mkv_path"]
@@ -1980,22 +1997,42 @@ class NollySubApp:
                     lang = item["lang"]
                     codec = item["codec"].lower()
 
-                    ext = ".srt"
+                    raw_ext = ".srt"
                     if "ass" in codec or "ssa" in codec:
-                        ext = ".ass"
+                        raw_ext = ".ass"
                     elif "pgs" in codec or "hdmv" in codec:
-                        ext = ".sup"
+                        raw_ext = ".sup"
                     elif "vobsub" in codec:
-                        ext = ".idx"
+                        raw_ext = ".idx"
                     elif "vtt" in codec or "webvtt" in codec:
-                        ext = ".vtt"
+                        raw_ext = ".vtt"
 
                     base = Path(fpath).stem
-                    out_file = os.path.join(out_dir, f"{base}.{lang}.track{tid}{ext}")
-                    cmd = [mextract, "tracks", fpath, f"{tid}:{out_file}"]
+                    raw_out_file = os.path.join(out_dir, f"{base}.{lang}.track{tid}{raw_ext}")
+                    cmd = [mextract, "tracks", fpath, f"{tid}:{raw_out_file}"]
                     res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore")
-                    if res.returncode == 0 and os.path.exists(out_file):
-                        extracted_files.append(out_file)
+
+                    if res.returncode == 0 and os.path.exists(raw_out_file):
+                        # İstenen hedef formata dönüştür
+                        if target_fmt != "original" and raw_ext in [".vtt", ".ass", ".ssa", ".srt", ".txt"]:
+                            try:
+                                content = read_text_file(raw_out_file)
+                                res_text = SubtitleConverter.convert(content, raw_ext, target_fmt)
+                                final_ext = f".{target_fmt}"
+                                final_out_file = os.path.join(out_dir, f"{base}.{lang}.track{tid}{final_ext}")
+
+                                with open(final_out_file, "w", encoding="utf-8-sig") as f:
+                                    f.write(res_text)
+
+                                if os.path.abspath(raw_out_file) != os.path.abspath(final_out_file) and os.path.exists(raw_out_file):
+                                    os.remove(raw_out_file)
+
+                                extracted_files.append(final_out_file)
+                            except Exception as e_conv:
+                                print(f"Dönüştürme hatası: {e_conv}")
+                                extracted_files.append(raw_out_file)
+                        else:
+                            extracted_files.append(raw_out_file)
                     else:
                         failed_count += 1
                 except Exception as e:
@@ -2008,9 +2045,10 @@ class NollySubApp:
                 pass
 
             if extracted_files:
+                fmt_str = target_fmt.upper() if target_fmt != "original" else "Orijinal"
                 ans = messagebox.askyesno(
                     "İşlem Tamamlandı 🎉",
-                    f"Seçilen {len(extracted_files)} adet altyazı başarıyla çıkarıldı!\n"
+                    f"Seçilen {len(extracted_files)} adet altyazı başarıyla çıkarıldı ve {fmt_str} formatına dönüştürüldü!\n"
                     + (f"({failed_count} altyazı çıkarılamadı)\n\n" if failed_count > 0 else "\n")
                     + f"Konum: {out_dir}\n\nKlasör açılsın mı?"
                 )
@@ -2023,7 +2061,7 @@ class NollySubApp:
                     "Lütfen MKVToolNix aracının sisteminizde tam kurulu olduğundan emin olun."
                 )
 
-        tk.Button(bottom_frame, text="⚡  Seçilen Altyazıları Çıkar", bg=COLORS["success"], fg="white",
+        tk.Button(bottom_frame, text="⚡  Altyazıları Çıkar & Dönüştür", bg=COLORS["success"], fg="white",
                   font=("Segoe UI", 10, "bold"), relief="flat", cursor="hand2", padx=20, pady=6,
                   command=start_extraction).pack(side=tk.RIGHT)
 
