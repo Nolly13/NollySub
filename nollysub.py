@@ -609,6 +609,37 @@ def is_tr_subtitle(item):
     return False
 
 
+def is_turkish_mkv_track(item):
+    """MKV altyazı track'inin Türkçe olup olmadığını detaylıca analiz eder."""
+    lang = str(item.get("lang") or item.get("language") or "").lower()
+    lang_ietf = str(item.get("language_ietf") or "").lower()
+    lang_raw = str(item.get("language_raw") or "").lower()
+    name = str(item.get("name") or "").lower()
+    filename = str(item.get("filename") or "").lower()
+
+    # Dil kodları (ISO 639-1, 639-2, BCP 47)
+    tr_codes = {"tur", "tr", "tr-tr", "tur-tr", "tr_tr", "tur_tr", "turkish", "türkçe", "turkce"}
+    for l in [lang, lang_ietf, lang_raw]:
+        if l in tr_codes or l.startswith("tr") or l.startswith("tur"):
+            return True
+
+    # Metin aramaları (Başlık / Track ismi)
+    tr_terms = ["türkçe", "turkce", "turkish", "tr sub", "tur sub", "tr-sub", "tur-sub", "tr_sub", "tur_sub", "[tr]", "(tr)", "[tur]", "(tur)"]
+    if any(term in name for term in tr_terms):
+        return True
+
+    # Kelime bazı isim kontrolü
+    name_words = name.replace("_", " ").replace("-", " ").replace(".", " ").split()
+    if any(word in ["tr", "tur", "türkçe", "turkce", "turkish"] for word in name_words):
+        return True
+
+    # Dosya adında dil uzantısı kontrolü
+    if any(f".{tag}." in filename or filename.endswith(f".{tag}") for tag in ["tr", "tur", "türkçe", "turkce", "turkish"]):
+        return True
+
+    return False
+
+
 class SubtitleConverter:
     """Farklı altyazı formatları (vtt, ttml, ass, txt) arasında dönüşüm yapar."""
 
@@ -719,14 +750,20 @@ class MkvTools:
         info = json.loads(res.stdout)
         tracks = []
         for t in info.get("tracks", []):
+            props = t.get("properties", {})
+            lang_ietf = props.get("language_ietf", "")
+            lang_raw = props.get("language", "")
+            lang = lang_ietf or lang_raw or "und"
             tracks.append({
                 "id": t["id"],
                 "type": t["type"],
                 "codec": t.get("codec", ""),
-                "language": t.get("properties", {}).get("language", "und"),
-                "name": t.get("properties", {}).get("track_name", ""),
-                "default": t.get("properties", {}).get("default_track", False),
-                "forced": t.get("properties", {}).get("forced_track", False),
+                "language": lang,
+                "language_ietf": lang_ietf,
+                "language_raw": lang_raw,
+                "name": props.get("track_name", ""),
+                "default": props.get("default_track", False),
+                "forced": props.get("forced_track", False),
             })
         return tracks
 
@@ -1549,6 +1586,8 @@ class NollySubApp:
                             "filename": os.path.basename(fpath),
                             "track_id": t["id"],
                             "lang": t["language"],
+                            "language_ietf": t.get("language_ietf", ""),
+                            "language_raw": t.get("language_raw", ""),
                             "codec": t["codec"],
                             "name": t["name"],
                             "default": t["default"],
@@ -1611,15 +1650,17 @@ class NollySubApp:
 
         selected_states = {}
 
-        def get_lang_display(code):
-            code = (code or "und").lower()
+        def get_lang_display(item):
+            code = (item.get("lang") or "und").lower()
+            if is_turkish_mkv_track(item):
+                return "Türkçe 🇹🇷"
             return LANG_MAP.get(code, code.upper())
 
         def populate_tree():
             tree.delete(*tree.get_children())
             selected_states.clear()
             for idx, item in enumerate(all_sub_tracks):
-                lang_str = get_lang_display(item["lang"])
+                lang_str = get_lang_display(item)
                 flags = []
                 if item["default"]: flags.append("Varsayılan")
                 if item["forced"]: flags.append("Zorunlu")
@@ -1662,13 +1703,31 @@ class NollySubApp:
                 tree.item(iid, values=vals)
 
         def select_tr_only():
+            tr_count = 0
             for idx, item in enumerate(all_sub_tracks):
                 iid = f"item_{idx}"
-                is_tr = item["lang"].lower() in ["tur", "tr"] or "türkçe" in (item["name"] or "").lower() or "turkish" in (item["name"] or "").lower()
+                is_tr = is_turkish_mkv_track(item)
                 selected_states[iid] = is_tr
+                if is_tr:
+                    tr_count += 1
                 vals = list(tree.item(iid, "values"))
                 vals[0] = "☑️ Seçili" if is_tr else "☐ Seçilmedi"
                 tree.item(iid, values=vals)
+
+            if tr_count == 0:
+                messagebox.showinfo(
+                    "Türkçe Altyazı Bulunamadı",
+                    "Seçilen MKV dosyalarında otomatik Türkçe altyazı etiketi tespit edilemedi.\n\n"
+                    "Dilerseniz listedeki diğer altyazıları elle seçip çıkarabilirsiniz."
+                )
+            else:
+                ans = messagebox.askyesno(
+                    "Türkçe Altyazılar Seçildi 🇹🇷",
+                    f"Toplam {tr_count} adet Türkçe altyazı izi başarıyla seçildi.\n\n"
+                    "Altyazıları çıkarmak ve bilgisayarınıza kaydetmek için şimdi klasör seçilsin mi?"
+                )
+                if ans:
+                    start_extraction()
 
         tk.Button(quick_frame, text="☑️ Tümünü Seç", bg=COLORS["bg_elevated"], fg=COLORS["text_primary"],
                   font=("Segoe UI", 9), relief="flat", cursor="hand2", padx=10, pady=3,
@@ -1700,6 +1759,7 @@ class NollySubApp:
                 return
 
             extracted_files = []
+            failed_count = 0
             for item in to_extract:
                 try:
                     fpath = item["mkv_path"]
@@ -1714,6 +1774,8 @@ class NollySubApp:
                         ext = ".sup"
                     elif "vobsub" in codec:
                         ext = ".idx"
+                    elif "vtt" in codec or "webvtt" in codec:
+                        ext = ".vtt"
 
                     base = Path(fpath).stem
                     out_file = os.path.join(out_dir, f"{base}.{lang}.track{tid}{ext}")
@@ -1721,16 +1783,32 @@ class NollySubApp:
                     res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore")
                     if res.returncode == 0 and os.path.exists(out_file):
                         extracted_files.append(out_file)
+                    else:
+                        failed_count += 1
                 except Exception as e:
                     print(f"Altyazı çıkarma hatası: {e}")
+                    failed_count += 1
 
-            sub_win.destroy()
-            ans = messagebox.askyesno(
-                "İşlem Tamamlandı 🎉",
-                f"Seçilen {len(extracted_files)} adet altyazı başarıyla çıkarıldı!\n\nKonum: {out_dir}\n\nKlasör açılsın mı?"
-            )
-            if ans and os.path.exists(out_dir):
-                os.startfile(out_dir)
+            try:
+                sub_win.destroy()
+            except Exception:
+                pass
+
+            if extracted_files:
+                ans = messagebox.askyesno(
+                    "İşlem Tamamlandı 🎉",
+                    f"Seçilen {len(extracted_files)} adet altyazı başarıyla çıkarıldı!\n"
+                    + (f"({failed_count} altyazı çıkarılamadı)\n\n" if failed_count > 0 else "\n")
+                    + f"Konum: {out_dir}\n\nKlasör açılsın mı?"
+                )
+                if ans and os.path.exists(out_dir):
+                    os.startfile(out_dir)
+            else:
+                messagebox.showerror(
+                    "Altyazı Çıkarılamadı",
+                    "Seçilen altyazılar çıkarılırken bir sorun oluştu veya kayıt klasörüne erişilemedi.\n\n"
+                    "Lütfen MKVToolNix aracının sisteminizde tam kurulu olduğundan emin olun."
+                )
 
         tk.Button(bottom_frame, text="⚡  Seçilen Altyazıları Çıkar", bg=COLORS["success"], fg="white",
                   font=("Segoe UI", 10, "bold"), relief="flat", cursor="hand2", padx=20, pady=6,
