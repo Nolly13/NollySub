@@ -927,55 +927,34 @@ class NollySubApp:
         btn_frame = tk.Frame(header, bg=COLORS["bg_surface"])
         btn_frame.pack(side=tk.RIGHT, padx=16)
 
-        mkv_btn = tk.Button(btn_frame, text="🎬 MKV Altyazı Çıkar",
-                            bg=COLORS["bg_elevated"], fg=COLORS["info"],
-                            font=("Segoe UI", 9, "bold"),
-                            relief="flat", cursor="hand2",
-                            activebackground=COLORS["border_light"],
-                            activeforeground="white",
-                            padx=10, pady=4,
-                            command=self._extract_subtitles_from_mkv_gui)
-        mkv_btn.pack(side=tk.LEFT, padx=3)
+        # Araçlar Menüsü
+        self.tools_menu = tk.Menu(self.root, tearoff=0,
+                                  bg=COLORS["bg_elevated"], fg=COLORS["text_primary"],
+                                  activebackground=COLORS["accent"], activeforeground="white",
+                                  font=("Segoe UI", 9.5))
+        self.tools_menu.add_command(label="🎬  MKV Altyazı Çıkar", command=self._extract_subtitles_from_mkv_gui)
+        self.tools_menu.add_command(label="🎙️  MKV Dublaj Değiştir", command=self._show_mkv_dub_changer_gui)
+        self.tools_menu.add_separator()
+        self.tools_menu.add_command(label="🔄  Altyazı Dönüştür (.srt / .ass)", command=self._show_subtitle_converter_gui)
+        self.tools_menu.add_command(label="📌  Masaüstü Kısayolu Oluştur", command=self._create_desktop_shortcut)
 
-        dub_btn = tk.Button(btn_frame, text="🎙️ MKV Dublaj Değiştir",
-                            bg=COLORS["bg_elevated"], fg="#a855f7",
-                            font=("Segoe UI", 9, "bold"),
-                            relief="flat", cursor="hand2",
-                            activebackground=COLORS["border_light"],
-                            activeforeground="white",
-                            padx=10, pady=4,
-                            command=self._show_mkv_dub_changer_gui)
-        dub_btn.pack(side=tk.LEFT, padx=3)
+        def _popup_tools_menu():
+            try:
+                x = tools_btn.winfo_rootx()
+                y = tools_btn.winfo_rooty() + tools_btn.winfo_height() + 4
+                self.tools_menu.tk_popup(x, y)
+            finally:
+                self.tools_menu.grab_release()
 
-        conv_btn = tk.Button(btn_frame, text="🔄 Altyazı Dönüştür",
-                             bg=COLORS["bg_elevated"], fg=COLORS["warning"],
-                             font=("Segoe UI", 9, "bold"),
-                             relief="flat", cursor="hand2",
-                             activebackground=COLORS["border_light"],
-                             activeforeground="white",
-                             padx=10, pady=4,
-                             command=self._show_subtitle_converter_gui)
-        conv_btn.pack(side=tk.LEFT, padx=3)
-
-        shortcut_btn = tk.Button(btn_frame, text="📌 Kısayol Oluştur",
-                                 bg=COLORS["bg_elevated"], fg=COLORS["success"],
-                                 font=("Segoe UI", 9),
-                                 relief="flat", cursor="hand2",
-                                 activebackground=COLORS["border_light"],
-                                 activeforeground="white",
-                                 padx=10, pady=4,
-                                 command=self._create_desktop_shortcut)
-        shortcut_btn.pack(side=tk.LEFT, padx=3)
-
-        settings_btn = tk.Button(btn_frame, text="⚙ Ayarlar",
-                                 bg=COLORS["bg_elevated"], fg=COLORS["text_secondary"],
-                                 font=("Segoe UI", 9),
-                                 relief="flat", cursor="hand2",
-                                 activebackground=COLORS["border_light"],
-                                 activeforeground=COLORS["text_primary"],
-                                 padx=10, pady=4,
-                                 command=self._show_settings)
-        settings_btn.pack(side=tk.LEFT, padx=3)
+        tools_btn = tk.Button(btn_frame, text="🛠️ Araçlar ▾",
+                              bg=COLORS["bg_elevated"], fg=COLORS["text_primary"],
+                              font=("Segoe UI", 9, "bold"),
+                              relief="flat", cursor="hand2",
+                              activebackground=COLORS["border_light"],
+                              activeforeground="white",
+                              padx=12, pady=5,
+                              command=_popup_tools_menu)
+        tools_btn.pack(side=tk.LEFT, padx=4)
 
         folder_btn = tk.Button(btn_frame, text="📁 İndirilenler",
                                bg=COLORS["bg_elevated"], fg=COLORS["text_secondary"],
@@ -983,9 +962,19 @@ class NollySubApp:
                                relief="flat", cursor="hand2",
                                activebackground=COLORS["border_light"],
                                activeforeground=COLORS["text_primary"],
-                               padx=10, pady=4,
+                               padx=12, pady=5,
                                command=self._open_download_folder)
-        folder_btn.pack(side=tk.LEFT, padx=3)
+        folder_btn.pack(side=tk.LEFT, padx=4)
+
+        settings_btn = tk.Button(btn_frame, text="⚙️ Ayarlar",
+                                 bg=COLORS["accent"], fg="white",
+                                 font=("Segoe UI", 9.5, "bold"),
+                                 relief="flat", cursor="hand2",
+                                 activebackground=COLORS["accent_hover"],
+                                 activeforeground="white",
+                                 padx=14, pady=5,
+                                 command=self._show_settings)
+        settings_btn.pack(side=tk.LEFT, padx=(8, 0))
 
     def _build_search_section(self, parent):
         """Arama bölümü."""
@@ -1302,68 +1291,174 @@ class NollySubApp:
         if ans:
             self._show_settings()
 
+    def _open_opensubtitles_key_page(self):
+        """OpenSubtitles API key alma sayfasını açar."""
+        webbrowser.open("https://www.opensubtitles.com/en/consumers")
+
+    def _open_subdl_key_page(self):
+        """SubDL API key alma sayfasını açar."""
+        webbrowser.open("https://subdl.com/panel/api")
+
     def _show_settings(self):
-        """Ayarlar penceresi."""
+        """Gelişmiş Ayarlar Penceresi."""
         settings_win = tk.Toplevel(self.root)
-        settings_win.title("⚙ NollySub Ayarları")
-        settings_win.geometry("540x480")
-        settings_win.configure(bg=COLORS["bg_surface"])
+        settings_win.title("⚙️ NollySub — Uygulama & API Ayarları")
+        settings_win.geometry("640x580")
+        settings_win.minsize(600, 550)
+        settings_win.configure(bg=COLORS["bg_deepest"])
         settings_win.transient(self.root)
         settings_win.grab_set()
 
-        pad = {"padx": 20, "pady": 10}
+        # Üst başlık alanı
+        header_frame = tk.Frame(settings_win, bg=COLORS["bg_surface"], pady=14, padx=20)
+        header_frame.pack(fill=tk.X, side=tk.TOP)
 
-        tk.Label(settings_win, text="⚙ Uygulama & API Ayarları", bg=COLORS["bg_surface"],
-                 fg=COLORS["text_primary"], font=("Segoe UI", 14, "bold")).pack(anchor=tk.W, **pad)
+        title_lbl = tk.Label(header_frame, text="⚙️ Uygulama & API Ayarları", bg=COLORS["bg_surface"],
+                             fg=COLORS["text_primary"], font=("Segoe UI", 14, "bold"))
+        title_lbl.pack(anchor=tk.W)
 
-        # OpenSubtitles Key
-        os_frame = tk.Frame(settings_win, bg=COLORS["bg_surface"])
-        os_frame.pack(fill=tk.X, **pad)
+        sub_lbl = tk.Label(header_frame,
+                           text="OpenSubtitles ve SubDL servislerinden tek tıkla ücretsiz API anahtarı alabilirsiniz.",
+                           bg=COLORS["bg_surface"], fg=COLORS["text_muted"], font=("Segoe UI", 9))
+        sub_lbl.pack(anchor=tk.W, pady=(2, 0))
 
-        tk.Label(os_frame, text="OpenSubtitles API Key:", bg=COLORS["bg_surface"],
-                 fg=COLORS["text_secondary"], font=("Segoe UI", 9, "bold")).pack(anchor=tk.W)
+        # Ana içerik alanı
+        content_frame = tk.Frame(settings_win, bg=COLORS["bg_deepest"], padx=20, pady=16)
+        content_frame.pack(fill=tk.BOTH, expand=True)
+
+        # 1. OPENSUBTITLES API KEY
+        os_card = tk.Frame(content_frame, bg=COLORS["bg_surface"], padx=14, pady=12, highlightthickness=1, highlightbackground=COLORS["border"])
+        os_card.pack(fill=tk.X, pady=(0, 12))
+
+        os_title = tk.Label(os_card, text="🌐 OpenSubtitles.com API Key", bg=COLORS["bg_surface"],
+                            fg=COLORS["text_primary"], font=("Segoe UI", 10, "bold"))
+        os_title.pack(anchor=tk.W)
+
+        os_row = tk.Frame(os_card, bg=COLORS["bg_surface"])
+        os_row.pack(fill=tk.X, pady=(6, 4))
 
         os_var = tk.StringVar(value=self.config.get_opensubtitles_key())
-        os_entry = tk.Entry(os_frame, textvariable=os_var, bg=COLORS["bg_input"],
-                            fg=COLORS["text_primary"], font=("Segoe UI", 10), relief="flat")
-        os_entry.pack(fill=tk.X, ipady=4, pady=(4, 0))
+        os_entry = tk.Entry(os_row, textvariable=os_var, bg=COLORS["bg_input"],
+                            fg=COLORS["text_primary"], font=("Segoe UI", 10),
+                            relief="flat", highlightthickness=1, highlightbackground=COLORS["border"],
+                            highlightcolor=COLORS["accent"], insertbackground=COLORS["accent"])
+        os_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=5, padx=(0, 8))
 
-        # SubDL Key
-        sd_frame = tk.Frame(settings_win, bg=COLORS["bg_surface"])
-        sd_frame.pack(fill=tk.X, **pad)
+        def get_os_key():
+            self._open_opensubtitles_key_page()
+            messagebox.showinfo(
+                "OpenSubtitles API Key",
+                "Tarayıcınızda OpenSubtitles API key alma sayfası açıldı!\n\n"
+                "1. Ücretsiz üye olun / giriş yapın.\n"
+                "2. 'Consumer API Key' oluşturun ve kopyalayın.\n"
+                "3. Kopyaladığınız anahtarı buradaki kutuya yapıştırın."
+            )
 
-        tk.Label(sd_frame, text="SubDL API Key:", bg=COLORS["bg_surface"],
-                 fg=COLORS["text_secondary"], font=("Segoe UI", 9, "bold")).pack(anchor=tk.W)
+        os_btn = tk.Button(os_row, text="🔑 Key Al (Tek Tıkla)", bg=COLORS["info"], fg="white",
+                           font=("Segoe UI", 9, "bold"), relief="flat", cursor="hand2",
+                           activebackground="#2563eb", activeforeground="white",
+                           padx=10, pady=4, command=get_os_key)
+        os_btn.pack(side=tk.RIGHT)
+
+        os_hint = tk.Label(os_card, text="💡 OpenSubtitles veritabanından altyazı indirmek için gereklidir.",
+                           bg=COLORS["bg_surface"], fg=COLORS["text_muted"], font=("Segoe UI", 8.5))
+        os_hint.pack(anchor=tk.W)
+
+        # 2. SUBDL API KEY
+        sd_card = tk.Frame(content_frame, bg=COLORS["bg_surface"], padx=14, pady=12, highlightthickness=1, highlightbackground=COLORS["border"])
+        sd_card.pack(fill=tk.X, pady=(0, 12))
+
+        sd_title = tk.Label(sd_card, text="📦 SubDL.com API Key", bg=COLORS["bg_surface"],
+                            fg=COLORS["text_primary"], font=("Segoe UI", 10, "bold"))
+        sd_title.pack(anchor=tk.W)
+
+        sd_row = tk.Frame(sd_card, bg=COLORS["bg_surface"])
+        sd_row.pack(fill=tk.X, pady=(6, 4))
 
         sd_var = tk.StringVar(value=self.config.get_subdl_key())
-        sd_entry = tk.Entry(sd_frame, textvariable=sd_var, bg=COLORS["bg_input"],
-                            fg=COLORS["text_primary"], font=("Segoe UI", 10), relief="flat")
-        sd_entry.pack(fill=tk.X, ipady=4, pady=(4, 0))
+        sd_entry = tk.Entry(sd_row, textvariable=sd_var, bg=COLORS["bg_input"],
+                            fg=COLORS["text_primary"], font=("Segoe UI", 10),
+                            relief="flat", highlightthickness=1, highlightbackground=COLORS["border"],
+                            highlightcolor=COLORS["accent"], insertbackground=COLORS["accent"])
+        sd_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=5, padx=(0, 8))
 
-        # İndirme Klasörü
-        dl_frame = tk.Frame(settings_win, bg=COLORS["bg_surface"])
-        dl_frame.pack(fill=tk.X, **pad)
+        def get_sd_key():
+            self._open_subdl_key_page()
+            messagebox.showinfo(
+                "SubDL API Key",
+                "Tarayıcınızda SubDL API key paneli açıldı!\n\n"
+                "1. SubDL hesabınıza giriş yapın.\n"
+                "2. Panelinizdeki API Key'i kopyalayın.\n"
+                "3. Kopyaladığınız anahtarı buradaki kutuya yapıştırın."
+            )
 
-        tk.Label(dl_frame, text="İndirme Klasörü:", bg=COLORS["bg_surface"],
-                 fg=COLORS["text_secondary"], font=("Segoe UI", 9, "bold")).pack(anchor=tk.W)
+        sd_btn = tk.Button(sd_row, text="🔑 Key Al (Tek Tıkla)", bg=COLORS["info"], fg="white",
+                           font=("Segoe UI", 9, "bold"), relief="flat", cursor="hand2",
+                           activebackground="#2563eb", activeforeground="white",
+                           padx=10, pady=4, command=get_sd_key)
+        sd_btn.pack(side=tk.RIGHT)
 
-        dl_row = tk.Frame(dl_frame, bg=COLORS["bg_surface"])
-        dl_row.pack(fill=tk.X, pady=(4, 0))
+        sd_hint = tk.Label(sd_card, text="💡 SubDL geniş altyazı arşivine erişmek için gereklidir.",
+                           bg=COLORS["bg_surface"], fg=COLORS["text_muted"], font=("Segoe UI", 8.5))
+        sd_hint.pack(anchor=tk.W)
+
+        # 3. İNDİRME KLASÖRÜ
+        dl_card = tk.Frame(content_frame, bg=COLORS["bg_surface"], padx=14, pady=12, highlightthickness=1, highlightbackground=COLORS["border"])
+        dl_card.pack(fill=tk.X, pady=(0, 12))
+
+        dl_title = tk.Label(dl_card, text="📁 Altyazı İndirme Klasörü", bg=COLORS["bg_surface"],
+                            fg=COLORS["text_primary"], font=("Segoe UI", 10, "bold"))
+        dl_title.pack(anchor=tk.W)
+
+        dl_row = tk.Frame(dl_card, bg=COLORS["bg_surface"])
+        dl_row.pack(fill=tk.X, pady=(6, 0))
 
         dl_var = tk.StringVar(value=self.config.get_download_dir())
         dl_entry = tk.Entry(dl_row, textvariable=dl_var, bg=COLORS["bg_input"],
-                            fg=COLORS["text_primary"], font=("Segoe UI", 10), relief="flat")
-        dl_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=4)
+                            fg=COLORS["text_primary"], font=("Segoe UI", 10),
+                            relief="flat", highlightthickness=1, highlightbackground=COLORS["border"],
+                            highlightcolor=COLORS["accent"], insertbackground=COLORS["accent"])
+        dl_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=5, padx=(0, 8))
 
         def browse_folder():
             folder = filedialog.askdirectory(initialdir=dl_var.get())
             if folder:
                 dl_var.set(folder)
 
-        tk.Button(dl_row, text="Gözat...", bg=COLORS["bg_elevated"], fg="white",
-                  command=browse_folder, relief="flat").pack(side=tk.RIGHT, padx=(6, 0))
+        dl_btn = tk.Button(dl_row, text="📂 Gözat...", bg=COLORS["bg_elevated"], fg=COLORS["text_primary"],
+                           font=("Segoe UI", 9), relief="flat", cursor="hand2",
+                           activebackground=COLORS["border_light"], activeforeground="white",
+                           padx=10, pady=4, command=browse_folder)
+        dl_btn.pack(side=tk.RIGHT)
 
-        # Kaydet Butonu
+        # 4. MKVTOOLNIX SİSTEM DURUMU
+        mmerge, mextract, _ = self.config.find_mkvtoolnix()
+        mkv_card = tk.Frame(content_frame, bg=COLORS["bg_surface"], padx=14, pady=10, highlightthickness=1, highlightbackground=COLORS["border"])
+        mkv_card.pack(fill=tk.X)
+
+        if mmerge:
+            mkv_status_lbl = tk.Label(mkv_card, text="🟢 MKVToolNix Tespit Edildi: MKV Altyazı & Dublaj araçları aktif.",
+                                      bg=COLORS["bg_surface"], fg=COLORS["success"], font=("Segoe UI", 9, "bold"))
+            mkv_status_lbl.pack(anchor=tk.W)
+        else:
+            mkv_row = tk.Frame(mkv_card, bg=COLORS["bg_surface"])
+            mkv_row.pack(fill=tk.X)
+            mkv_status_lbl = tk.Label(mkv_row, text="⚠️ MKVToolNix Bulunamadı: MKV altyazı çıkarma için gereklidir.",
+                                      bg=COLORS["bg_surface"], fg=COLORS["warning"], font=("Segoe UI", 9))
+            mkv_status_lbl.pack(side=tk.LEFT)
+
+            def get_mkv():
+                webbrowser.open("https://mkvtoolnix.download/downloads.html")
+
+            mkv_dl_btn = tk.Button(mkv_row, text="📥 İndir", bg=COLORS["bg_elevated"], fg=COLORS["warning"],
+                                   font=("Segoe UI", 8.5, "bold"), relief="flat", cursor="hand2",
+                                   command=get_mkv)
+            mkv_dl_btn.pack(side=tk.RIGHT)
+
+        # Alt Butonlar
+        bottom_frame = tk.Frame(settings_win, bg=COLORS["bg_surface"], pady=12, padx=20)
+        bottom_frame.pack(fill=tk.X, side=tk.BOTTOM)
+
         def save_and_close():
             self.config.set_opensubtitles_key(os_var.get().strip())
             self.config.set_subdl_key(sd_var.get().strip())
@@ -1378,9 +1473,17 @@ class NollySubApp:
             messagebox.showinfo("Başarılı", "Ayarlar başarıyla kaydedildi!")
             settings_win.destroy()
 
-        tk.Button(settings_win, text="💾  Ayarları Kaydet", bg=COLORS["accent"], fg="white",
-                  font=("Segoe UI", 10, "bold"), relief="flat", cursor="hand2",
-                  padx=16, pady=6, command=save_and_close).pack(pady=20)
+        save_btn = tk.Button(bottom_frame, text="💾  Ayarları Kaydet", bg=COLORS["accent"], fg="white",
+                             font=("Segoe UI", 10, "bold"), relief="flat", cursor="hand2",
+                             activebackground=COLORS["accent_hover"], activeforeground="white",
+                             padx=18, pady=6, command=save_and_close)
+        save_btn.pack(side=tk.RIGHT, padx=(8, 0))
+
+        cancel_btn = tk.Button(bottom_frame, text="Kapat", bg=COLORS["bg_elevated"], fg=COLORS["text_secondary"],
+                               font=("Segoe UI", 9.5), relief="flat", cursor="hand2",
+                               activebackground=COLORS["border_light"], activeforeground="white",
+                               padx=14, pady=6, command=settings_win.destroy)
+        cancel_btn.pack(side=tk.RIGHT)
 
     def _open_download_folder(self):
         """İndirme klasörünü dosya gezgininde açar."""

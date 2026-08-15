@@ -42,7 +42,7 @@
 
 ### 1. Depoyu Klonlayın
 ```bash
-git clone https://github.com/KULLANICI_ADIN/NollySub.git
+git clone https://github.com/Nolly13/NollySub.git
 cd NollySub
 ```
 
@@ -64,8 +64,8 @@ python nollysub.py
 **NollySub**, varsayılan olarak **AnimeTosho**, **Nyaa.si** ve **SubsPlease** veritabanlarını hiçbir API anahtarı gerektirmeden doğrudan kullanır.
 
 İsteğe bağlı olarak **OpenSubtitles** ve **SubDL** servislerine erişmek için:
-1. Uygulamadaki `⚙ Ayarlar` butonuna tıklayın.
-2. Ücretsiz aldığınız API anahtarlarınızı ilgili kutucuklara yapıştırıp kaydedin.
+1. Uygulamadaki `⚙️ Ayarlar` butonuna tıklayın.
+2. `🔑 Key Al (Tek Tıkla)` butonlarına basarak tarayıcıda açılan sayfadan ücretsiz API anahtarınızı saniyeler içinde kopyalayıp ilgili kutucuğa yapıştırın ve kaydedin.
 
 ---
 
