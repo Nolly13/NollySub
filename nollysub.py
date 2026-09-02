@@ -43,7 +43,7 @@ try:
     import requests
 except ImportError:
     print("'requests' kütüphanesi bulunamadı. Kuruluyor...")
-    os.system(f"{sys.executable} -m pip install requests")
+    subprocess.run([sys.executable, "-m", "pip", "install", "requests"])
     import requests
 
 
@@ -640,6 +640,53 @@ def is_turkish_mkv_track(item):
     return False
 
 
+def match_audio_track_lang(item, target_lang):
+    """MKV ses izinin verilen hedef dille (Japonca, Türkçe, İngilizce vb.) eşleşip eşleşmediğini kontrol eder."""
+    if not target_lang:
+        return False
+
+    t_clean = str(target_lang).strip().lower()
+    if not t_clean:
+        return False
+
+    lang = str(item.get("lang") or item.get("language") or "").lower()
+    lang_ietf = str(item.get("language_ietf") or "").lower()
+    lang_raw = str(item.get("language_raw") or "").lower()
+    name = str(item.get("name") or "").lower()
+
+    lang_map_groups = {
+        "jpn": ["jpn", "ja", "japanese", "japonca", "jap"],
+        "tur": ["tur", "tr", "turkish", "türkçe", "turkce"],
+        "eng": ["eng", "en", "english", "ingilizce", "ing"],
+        "ger": ["ger", "deu", "de", "german", "almanca"],
+        "fra": ["fra", "fre", "fr", "french", "fransızca", "fransizca"],
+        "spa": ["spa", "es", "spanish", "ispanyolca", "ispanyolca"],
+    }
+
+    matched_group = None
+    for group_key, aliases in lang_map_groups.items():
+        if t_clean in aliases or any(alias in t_clean for alias in aliases):
+            matched_group = aliases
+            break
+
+    if matched_group:
+        for l_val in [lang, lang_ietf, lang_raw]:
+            if any(alias == l_val or l_val.startswith(alias) for alias in matched_group):
+                return True
+        if any(alias in name for alias in matched_group):
+            return True
+        name_words = name.replace("_", " ").replace("-", " ").replace(".", " ").split()
+        if any(word in matched_group for word in name_words):
+            return True
+    else:
+        for l_val in [lang, lang_ietf, lang_raw, name]:
+            if t_clean in l_val:
+                return True
+
+    return False
+
+
+
 def read_text_file(fpath):
     """Farklı kodlamaları (UTF-8, UTF-8-BOM, CP1254, ISO-8859-9, Latin-1) deneyerek dosyayı okur."""
     for enc in ["utf-8-sig", "utf-8", "cp1254", "iso-8859-9", "latin-1"]:
@@ -1094,18 +1141,39 @@ class MkvTools:
         return extracted
 
     @staticmethod
-    def set_default_audio(mkv_path, audio_track_id, mkvpropedit_bin):
+    def set_default_audio(mkv_path, audio_track_id, mkvpropedit_bin, mkvmerge_bin=None, target_lang=None):
         """MKV içindeki varsayılan ses (dublaj) izini değiştirir."""
-        tracks = MkvTools.get_tracks(mkv_path, shutil.which("mkvmerge") or "mkvmerge")
+        if not mkvmerge_bin:
+            mkvmerge_bin = shutil.which("mkvmerge") or "mkvmerge"
+
+        try:
+            tracks = MkvTools.get_tracks(mkv_path, mkvmerge_bin)
+        except Exception:
+            tracks = []
+
         audio_tracks = [t for t in tracks if t["type"] == "audio"]
+        if not audio_tracks:
+            cmd = [mkvpropedit_bin, mkv_path, "--edit", f"track:{audio_track_id + 1}", "--set", "flag-default=1"]
+            res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore")
+            return res.returncode == 0
+
+        target_id = audio_track_id
+
+        # Eğer hedef dil belirtildiyse, bu MKV dosyasında o dildeki ses izini otomatik bul
+        if target_lang:
+            for t in audio_tracks:
+                if match_audio_track_lang(t, target_lang):
+                    target_id = t["id"]
+                    break
 
         cmd = [mkvpropedit_bin, mkv_path]
-        for t in audio_tracks:
-            is_def = "1" if t["id"] == audio_track_id else "0"
-            cmd.extend(["--edit", f"track:{t['id'] + 1}", "--set", f"flag-default={is_def}"])
+        for idx, t in enumerate(audio_tracks):
+            is_def = "1" if t["id"] == target_id else "0"
+            cmd.extend(["--edit", f"track:a{idx + 1}", "--set", f"flag-default={is_def}"])
 
         res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore")
         return res.returncode == 0
+
 
 
 # ══════════════════════════════════════════════════════
@@ -2290,10 +2358,16 @@ class NollySubApp:
                 messagebox.showwarning("Uyarı", "Lütfen varsayılan yapmak istediğiniz ses izini seçin.")
                 return
 
+            target_lang = None
+            for t in audio_tracks:
+                if t["id"] == target_id:
+                    target_lang = t.get("language") or t.get("language_ietf") or t.get("language_raw")
+                    break
+
             success_count = 0
             for fpath in selected_files:
                 try:
-                    if MkvTools.set_default_audio(fpath, target_id, mpropedit, mmerge):
+                    if MkvTools.set_default_audio(fpath, target_id, mpropedit, mmerge, target_lang=target_lang):
                         success_count += 1
                 except Exception as e:
                     print(f"Hata ({fpath}): {e}")

@@ -53,10 +53,13 @@ pip install -r requirements.txt
 ```
 
 ### 3. Uygulamayı Başlatın
+- **Windows için (Tek Tıkla)**: `Başlat.bat` veya `run.bat` dosyasına çift tıklayın.
+- **Terminalden**:
 ```bash
-python nollysub.py
+py nollysub.py
+# veya
+python netrip.py
 ```
-*(veya Windows üzerinde çift tıklayarak çalıştırın)*
 
 ---
 
