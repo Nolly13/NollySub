@@ -1278,8 +1278,11 @@ class MkvTools:
         return extracted
 
     @staticmethod
-    def set_default_audio(mkv_path, audio_track_id, mkvpropedit_bin=None, mkvmerge_bin=None, ffmpeg_bin=None, target_lang=None, ffprobe_bin=None):
-        """MKV/MP4 içindeki varsayılan ses (dublaj) izini değiştirir ve tüm oynatıcılar için fiziki olarak en başa taşır."""
+    def set_default_audio(mkv_path, audio_track_id, mkvpropedit_bin=None, mkvmerge_bin=None, ffmpeg_bin=None, target_lang=None, ffprobe_bin=None, keep_only_selected=False, save_as_new=True):
+        """MKV/MP4 içindeki varsayılan ses (dublaj) izini değiştirir.
+        keep_only_selected: True ise diğer ses izlerini siler (Tek Ses İzi Modu - %100 Çözüm).
+        save_as_new: True ise medya oynatıcı önbellek çakışmasını önlemek için _TurkceDublaj sonekiyle yeni dosya olarak kaydeder.
+        """
         if not ffmpeg_bin:
             ffmpeg_bin = shutil.which("ffmpeg") or "ffmpeg"
         if not ffprobe_bin:
@@ -1323,12 +1326,19 @@ class MkvTools:
         is_mp4 = str(mkv_path).lower().endswith((".mp4", ".m4v", ".mov"))
         creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
+        # Hedef dosya yolu belirleme
+        base, ext = os.path.splitext(mkv_path)
+        if save_as_new and not base.endswith("_TurkceDublaj"):
+            final_target_path = f"{base}_TurkceDublaj{ext}"
+        else:
+            final_target_path = mkv_path
+
         # YÖNTEM 1: MKVToolNix (mkvmerge) Motoru ile İz Sıralama ve Varsayılan Bayrak (MKV & MP4 Desteği)
         if mkvmerge_bin and (os.path.exists(mkvmerge_bin) or shutil.which(mkvmerge_bin)):
             try:
                 mkv_info_cmd = [mkvmerge_bin, "-J", mkv_path]
                 res_mkv_info = subprocess.run(mkv_info_cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore", creationflags=creation_flags)
-                if res_mkv_info.returncode == 0 and res_mkv_info.stdout.strip():
+                if res_mkv_info.returncode in (0, 1, 2) and res_mkv_info.stdout.strip():
                     info = json.loads(res_mkv_info.stdout)
                     all_mkv_tracks = info.get("tracks", [])
                     mkv_audio_tracks = [t for t in all_mkv_tracks if t["type"] == "audio"]
@@ -1356,45 +1366,67 @@ class MkvTools:
                         other_audio_tids = [t["id"] for t in mkv_audio_tracks if t["id"] != mkv_target_id]
                         other_tids = [t["id"] for t in all_mkv_tracks if t["type"] not in ("video", "audio")]
 
-                        ordered_ids = video_tids + [mkv_target_id] + other_audio_tids + other_tids
-                        track_order_str = ",".join(f"0:{tid}" for tid in ordered_ids)
-
                         temp_mkv = str(mkv_path) + ".tmp_mkvmerge.mkv"
                         cmd = [mkvmerge_bin, "-o", temp_mkv]
 
-                        for t in mkv_audio_tracks:
-                            is_def = "yes" if t["id"] == mkv_target_id else "no"
-                            cmd.extend(["--default-track-flag", f"{t['id']}:{is_def}"])
-                            if t["id"] == mkv_target_id:
-                                cmd.extend(["--language", f"{t['id']}:{eff_lang}"])
+                        if keep_only_selected:
+                            # Tek Ses İzi Modu: Sadece seçilen dublaj izini sakla
+                            cmd.extend(["--audio-tracks", str(mkv_target_id)])
+                            cmd.extend(["--default-track-flag", f"{mkv_target_id}:yes"])
+                            cmd.extend(["--language", f"{mkv_target_id}:{eff_lang}"])
+                            cmd.append(mkv_path)
+                        else:
+                            # Çoklu Ses İzi Modu: İz sırasını değiştir
+                            ordered_ids = video_tids + [mkv_target_id] + other_audio_tids + other_tids
+                            track_order_str = ",".join(f"0:{tid}" for tid in ordered_ids)
+                            for t in mkv_audio_tracks:
+                                is_def = "yes" if t["id"] == mkv_target_id else "no"
+                                cmd.extend(["--default-track-flag", f"{t['id']}:{is_def}"])
+                                if t["id"] == mkv_target_id:
+                                    cmd.extend(["--language", f"{t['id']}:{eff_lang}"])
+                            cmd.extend(["--track-order", track_order_str, mkv_path])
 
-                        cmd.extend(["--track-order", track_order_str, mkv_path])
                         res_mkv = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore", creationflags=creation_flags)
 
                         if res_mkv.returncode in (0, 1) and os.path.exists(temp_mkv) and os.path.getsize(temp_mkv) > 0:
                             if not is_mp4:
-                                os.replace(temp_mkv, mkv_path)
+                                if final_target_path != mkv_path:
+                                    shutil.copy2(temp_mkv, final_target_path)
+                                    try: os.remove(temp_mkv)
+                                    except Exception: pass
+                                else:
+                                    os.replace(temp_mkv, mkv_path)
                                 return True
                             else:
                                 # MP4 dosyaları için mkvmerge çıktısını FFmpeg ile MP4 konteynırına kopyala
                                 temp_mp4 = str(mkv_path) + ".tmp_nolly.mp4"
-                                cmd_ff = [
-                                    ffmpeg_bin, "-y", "-i", temp_mkv, "-c", "copy",
-                                    "-map", "0:v?", "-map", "0:a?", "-map", "0:s?", "-map", "0:d?",
-                                    "-disposition:a:0", "default",
-                                    "-metadata:s:a:0", f"language={eff_lang}",
-                                    "-movflags", "+faststart",
-                                    temp_mp4
-                                ]
-                                for idx in range(1, len(mkv_audio_tracks)):
-                                    cmd_ff.extend([f"-disposition:a:{idx}", "0", f"-metadata:s:a:{idx}", "language=und"])
+                                cmd_ff = [ffmpeg_bin, "-y", "-i", temp_mkv, "-c", "copy", "-map", "0:v?"]
+
+                                if keep_only_selected:
+                                    cmd_ff.extend(["-map", "0:a:0?"])
+                                else:
+                                    cmd_ff.extend(["-map", "0:a?"])
+
+                                cmd_ff.extend(["-map", "0:s?", "-map", "0:d?"])
+                                cmd_ff.extend(["-disposition:a:0", "default", "-metadata:s:a:0", f"language={eff_lang}"])
+
+                                if not keep_only_selected:
+                                    for idx in range(1, len(mkv_audio_tracks)):
+                                        cmd_ff.extend([f"-disposition:a:{idx}", "0", f"-metadata:s:a:{idx}", "language=und"])
+
+                                cmd_ff.extend(["-movflags", "+faststart", temp_mp4])
 
                                 res_ff = subprocess.run(cmd_ff, capture_output=True, text=True, encoding="utf-8", errors="ignore", creationflags=creation_flags)
                                 try: os.remove(temp_mkv)
                                 except Exception: pass
 
                                 if res_ff.returncode == 0 and os.path.exists(temp_mp4) and os.path.getsize(temp_mp4) > 0:
-                                    os.replace(temp_mp4, mkv_path)
+                                    if final_target_path != mkv_path:
+                                        shutil.copy2(temp_mp4, final_target_path)
+                                        try: os.remove(temp_mp4)
+                                        except Exception: pass
+                                    else:
+                                        os.replace(temp_mp4, mkv_path)
                                     return True
                                 else:
                                     if os.path.exists(temp_mp4):
@@ -1418,18 +1450,18 @@ class MkvTools:
 
                 cmd = [ffmpeg_bin, "-y", "-i", mkv_path, "-c", "copy", "-map", "0:v?"]
                 cmd.extend(["-map", f"0:a:{target_rel_idx}"])
-                for idx in range(total_audio):
-                    if idx != target_rel_idx:
-                        cmd.extend(["-map", f"0:a:{idx}"])
+
+                if not keep_only_selected:
+                    for idx in range(total_audio):
+                        if idx != target_rel_idx:
+                            cmd.extend(["-map", f"0:a:{idx}"])
+
                 cmd.extend(["-map", "0:s?", "-map", "0:d?"])
+                cmd.extend(["-disposition:a:0", "default", "-metadata:s:a:0", f"language={eff_lang}"])
 
-                for idx in range(total_audio):
-                    disp_val = "default" if idx == 0 else "0"
-                    cmd.extend([f"-disposition:a:{idx}", disp_val])
-
-                cmd.extend(["-metadata:s:a:0", f"language={eff_lang}"])
-                for idx in range(1, total_audio):
-                    cmd.extend([f"-metadata:s:a:{idx}", "language=und"])
+                if not keep_only_selected:
+                    for idx in range(1, total_audio):
+                        cmd.extend([f"-disposition:a:{idx}", "0", f"-metadata:s:a:{idx}", "language=und"])
 
                 if is_mp4:
                     cmd.extend(["-movflags", "+faststart"])
@@ -1437,7 +1469,12 @@ class MkvTools:
                 cmd.append(temp_out)
                 res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore", creationflags=creation_flags)
                 if res.returncode == 0 and os.path.exists(temp_out) and os.path.getsize(temp_out) > 0:
-                    os.replace(temp_out, mkv_path)
+                    if final_target_path != mkv_path:
+                        shutil.copy2(temp_out, final_target_path)
+                        try: os.remove(temp_out)
+                        except Exception: pass
+                    else:
+                        os.replace(temp_out, mkv_path)
                     return True
                 else:
                     if os.path.exists(temp_out):
@@ -2781,6 +2818,23 @@ class NollySubApp:
 
         load_mkv_tracks()
 
+        # Seçenekler Alanı
+        opts_card = tk.Frame(dub_win, bg=COLORS["bg_surface"], padx=20, pady=5)
+        opts_card.pack(fill=tk.X)
+
+        save_as_new_var = tk.BooleanVar(value=True)
+        keep_only_selected_var = tk.BooleanVar(value=False)
+
+        cb1 = tk.Checkbutton(opts_card, text="🛡️ Medya oynatıcı önbellek çakışmasını önle (_TurkceDublaj sonekiyle yeni dosya kaydet)",
+                             variable=save_as_new_var, bg=COLORS["bg_surface"], fg=COLORS["text_primary"],
+                             selectcolor=COLORS["bg_deep"], activebackground=COLORS["bg_surface"], font=("Segoe UI", 9, "bold"))
+        cb1.pack(anchor=tk.W)
+
+        cb2 = tk.Checkbutton(opts_card, text="⚡ %100 Kesin Çözüm: Seçilen Dublaj Dışındaki Diğer Ses İzlerini Sil (Yalnızca seçilen dublaj kalsın)",
+                             variable=keep_only_selected_var, bg=COLORS["bg_surface"], fg=COLORS["warning"],
+                             selectcolor=COLORS["bg_deep"], activebackground=COLORS["bg_surface"], font=("Segoe UI", 9, "bold"))
+        cb2.pack(anchor=tk.W, pady=(2, 0))
+
         # Alt İşlem Butonları
         bottom_frame = tk.Frame(dub_win, bg=COLORS["bg_surface"], padx=20, pady=15)
         bottom_frame.pack(fill=tk.X, side=tk.BOTTOM)
@@ -2800,16 +2854,32 @@ class NollySubApp:
                     target_lang = t.get("language") or t.get("language_ietf") or t.get("language_raw")
                     break
 
+            is_keep_only = keep_only_selected_var.get()
+            is_save_new = save_as_new_var.get()
+
             success_count = 0
             for fpath in selected_files:
                 try:
-                    if MkvTools.set_default_audio(fpath, target_id, mpropedit, mmerge, ffmpeg_bin=ffmpeg_bin, target_lang=target_lang, ffprobe_bin=ffprobe_bin):
+                    if MkvTools.set_default_audio(
+                        fpath,
+                        target_id,
+                        mpropedit,
+                        mmerge,
+                        ffmpeg_bin=ffmpeg_bin,
+                        target_lang=target_lang,
+                        ffprobe_bin=ffprobe_bin,
+                        keep_only_selected=is_keep_only,
+                        save_as_new=is_save_new
+                    ):
                         success_count += 1
                 except Exception as e:
                     print(f"Hata ({fpath}): {e}")
 
             if success_count > 0:
-                messagebox.showinfo("Başarılı 🎉", f"Toplam {success_count} video dosyasında seçilen dublaj sesi varsayılan 1. ses izi yapıldı!")
+                msg = f"Toplam {success_count} video dosyasında seçilen dublaj sesi başarıyla varsayılan yapıldı!"
+                if is_save_new:
+                    msg += "\n\n📄 Dosyalar medya oynatıcı önbellek çakışmasını önlemek için '_TurkceDublaj' uzantısıyla yeni dosya olarak kaydedildi."
+                messagebox.showinfo("Başarılı 🎉", msg)
                 load_mkv_tracks()
             else:
                 messagebox.showerror("Hata", "Varsayılan ses izi güncellenirken bir hata oluştu.")
