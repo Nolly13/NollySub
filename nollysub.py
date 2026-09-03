@@ -196,6 +196,51 @@ class ConfigManager:
 
         return None, None, None
 
+    def get_ffmpeg_dir(self):
+        return self.config["General"].get("ffmpeg_dir", "").strip()
+
+    def set_ffmpeg_dir(self, path):
+        self.config["General"]["ffmpeg_dir"] = path
+        self.save()
+
+    def find_ffmpeg(self):
+        """Sistemdeki, ayarlardaki veya WinGet / Portable klasörlerdeki FFmpeg yolunu otomatik bulur."""
+        custom_dir = self.get_ffmpeg_dir()
+        if custom_dir:
+            ff = os.path.join(custom_dir, "ffmpeg.exe") if os.path.isdir(custom_dir) else custom_dir
+            if os.path.exists(ff):
+                return ff
+
+        # 1. System PATH
+        sys_ff = shutil.which("ffmpeg")
+        if sys_ff and os.path.exists(sys_ff):
+            return sys_ff
+
+        # 2. WinGet Packages dizini arama
+        local_app_data = os.environ.get("LOCALAPPDATA", "")
+        if local_app_data:
+            winget_dir = os.path.join(local_app_data, "Microsoft", "WinGet", "Packages")
+            if os.path.exists(winget_dir):
+                for root, dirs, files in os.walk(winget_dir):
+                    if "ffmpeg.exe" in files:
+                        return os.path.join(root, "ffmpeg.exe")
+
+        # 3. Bilinen standart yollar
+        possible_paths = [
+            r"C:\Program Files\ffmpeg\bin\ffmpeg.exe",
+            r"C:\Program Files (x86)\ffmpeg\bin\ffmpeg.exe",
+            r"C:\ffmpeg\bin\ffmpeg.exe",
+            os.path.join(os.getcwd(), "ffmpeg.exe"),
+            os.path.join(os.getcwd(), "ffmpeg", "bin", "ffmpeg.exe"),
+        ]
+
+        for path in possible_paths:
+            if path and os.path.exists(path):
+                return path
+
+        return None
+
+
 
 # ══════════════════════════════════════════════════════
 # MOTORLAR (API & RSS ENTEGRASYONLARI)
@@ -1142,9 +1187,11 @@ class MkvTools:
 
     @staticmethod
     def set_default_audio(mkv_path, audio_track_id, mkvpropedit_bin, mkvmerge_bin=None, target_lang=None):
-        """MKV içindeki varsayılan ses (dublaj) izini değiştirir."""
+        """MKV içindeki varsayılan ses (dublaj) izini değiştirir ve tüm oynatıcılar (Windows Media Player dahil) için fiziki olarak en başa taşır."""
         if not mkvmerge_bin:
             mkvmerge_bin = shutil.which("mkvmerge") or "mkvmerge"
+        if not mkvpropedit_bin:
+            mkvpropedit_bin = shutil.which("mkvpropedit") or "mkvpropedit"
 
         try:
             tracks = MkvTools.get_tracks(mkv_path, mkvmerge_bin)
@@ -1153,9 +1200,11 @@ class MkvTools:
 
         audio_tracks = [t for t in tracks if t["type"] == "audio"]
         if not audio_tracks:
-            cmd = [mkvpropedit_bin, mkv_path, "--edit", f"track:{audio_track_id + 1}", "--set", "flag-default=1"]
-            res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore")
-            return res.returncode == 0
+            if mkvpropedit_bin and (os.path.exists(mkvpropedit_bin) or shutil.which(mkvpropedit_bin)):
+                cmd = [mkvpropedit_bin, mkv_path, "--edit", f"track:{audio_track_id + 1}", "--set", "flag-default=1"]
+                res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore")
+                return res.returncode == 0
+            return False
 
         target_id = audio_track_id
 
@@ -1166,14 +1215,139 @@ class MkvTools:
                     target_id = t["id"]
                     break
 
-        cmd = [mkvpropedit_bin, mkv_path]
-        for idx, t in enumerate(audio_tracks):
-            is_def = "1" if t["id"] == target_id else "0"
-            cmd.extend(["--edit", f"track:a{idx + 1}", "--set", f"flag-default={is_def}"])
+        # 1. YÖNTEM: mkvmerge ile fiziksel iz sırasını değiştir (Windows Medya Oynatıcısı gibi 1. izi okuyan oynatıcılar için)
+        if mkvmerge_bin and (os.path.exists(mkvmerge_bin) or shutil.which(mkvmerge_bin)):
+            try:
+                video_tracks = [t["id"] for t in tracks if t["type"] == "video"]
+                other_audio = [t["id"] for t in audio_tracks if t["id"] != target_id]
+                other_tracks = [t["id"] for t in tracks if t["type"] not in ("video", "audio")]
 
-        res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore")
-        return res.returncode == 0
+                ordered_ids = video_tracks + [target_id] + other_audio + other_tracks
+                track_order_str = ",".join(f"0:{tid}" for tid in ordered_ids)
 
+                temp_path = str(mkv_path) + ".tmp_nolly.mkv"
+                cmd = [mkvmerge_bin, "-o", temp_path]
+
+                for t in audio_tracks:
+                    is_def = "yes" if t["id"] == target_id else "no"
+                    cmd.extend(["--default-track-flag", f"{t['id']}:{is_def}"])
+
+                cmd.extend(["--track-order", track_order_str, mkv_path])
+
+                res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore")
+                if res.returncode in (0, 1) and os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:
+                    os.replace(temp_path, mkv_path)
+                    return True
+                else:
+                    if os.path.exists(temp_path):
+                        try:
+                            os.remove(temp_path)
+                        except Exception:
+                            pass
+            except Exception as e:
+                print(f"mkvmerge remux hatası: {e}")
+
+        # 2. YÖNTEM: mkvpropedit ile başlık ve bayrakları güncelle (Hızlı Fallback)
+        if mkvpropedit_bin and (os.path.exists(mkvpropedit_bin) or shutil.which(mkvpropedit_bin)):
+            cmd = [mkvpropedit_bin, mkv_path]
+            for idx, t in enumerate(audio_tracks):
+                is_def = "1" if t["id"] == target_id else "0"
+                cmd.extend(["--edit", f"track:a{idx + 1}", "--set", f"flag-default={is_def}"])
+                if t["id"] == target_id:
+                    cmd.extend(["--set", "language=tur", "--set", "language-ietf=tr"])
+
+            res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore")
+            return res.returncode == 0
+
+        return False
+
+
+class MkvToMp4Converter:
+    """MKV dosyalarını MP4 formatına dönüştüren FFmpeg yardımcısı."""
+
+    @staticmethod
+    def convert(mkv_path, output_mp4, ffmpeg_bin, mode="auto", progress_callback=None, cancel_event=None, proc_holder=None):
+        """
+        mode:
+          - "fast": -c copy -map 0:v? -map 0:a? (Stream copy - ultra hızlı)
+          - "reencode": -c:v libx264 -crf 23 -preset fast -c:a aac -b:a 192k (Tam kodlama)
+          - "auto": Önce "fast" dener; hata verirse otomatik olarak "reencode" dener.
+        """
+        if not ffmpeg_bin or not os.path.exists(ffmpeg_bin):
+            return False, "FFmpeg çalıştırılabilir dosyası bulunamadı."
+
+        def run_ffmpeg(cmd_args):
+            cmd = [ffmpeg_bin, "-y", "-i", mkv_path] + cmd_args + [output_mp4]
+            creation_flags = 0
+            if sys.platform == "win32":
+                creation_flags = subprocess.CREATE_NO_WINDOW
+
+            try:
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    universal_newlines=True,
+                    encoding="utf-8",
+                    errors="ignore",
+                    creationflags=creation_flags
+                )
+            except Exception as e:
+                return False, str(e)
+
+            if proc_holder is not None:
+                proc_holder[0] = proc
+
+            output_logs = []
+            while True:
+                if cancel_event and cancel_event.is_set():
+                    proc.kill()
+                    return False, "İptal edildi."
+
+                line = proc.stdout.readline()
+                if not line and proc.poll() is not None:
+                    break
+                if line:
+                    output_logs.append(line)
+                    if progress_callback and ("time=" in line or "frame=" in line or "fps=" in line):
+                        progress_callback(line.strip())
+
+            return_code = proc.poll()
+            if proc_holder is not None:
+                proc_holder[0] = None
+
+            if return_code == 0 and os.path.exists(output_mp4) and os.path.getsize(output_mp4) > 0:
+                return True, "Başarılı"
+            else:
+                err_msg = output_logs[-1].strip() if output_logs else "Bilinmeyen FFmpeg hatası"
+                return False, err_msg
+
+        if mode == "fast":
+            success, msg = run_ffmpeg(["-c", "copy", "-map", "0:v?", "-map", "0:a?"])
+            return success, msg
+        elif mode == "reencode":
+            success, msg = run_ffmpeg(["-c:v", "libx264", "-crf", "23", "-preset", "fast", "-c:a", "aac", "-b:a", "192k"])
+            return success, msg
+        else:  # "auto"
+            success, msg = run_ffmpeg(["-c", "copy", "-map", "0:v?", "-map", "0:a?"])
+            if success:
+                return True, "Başarılı (Remux)"
+            if cancel_event and cancel_event.is_set():
+                return False, "İptal edildi."
+
+            if progress_callback:
+                progress_callback("Remux uyumsuz, yeniden kodlanıyor...")
+
+            if os.path.exists(output_mp4):
+                try:
+                    os.remove(output_mp4)
+                except Exception:
+                    pass
+
+            success_re, msg_re = run_ffmpeg(["-c:v", "libx264", "-crf", "23", "-preset", "fast", "-c:a", "aac", "-b:a", "192k"])
+            if success_re:
+                return True, "Başarılı (Yeniden Kodlama)"
+            return False, f"Hata: {msg_re}"
 
 
 # ══════════════════════════════════════════════════════
@@ -1354,6 +1528,7 @@ class NollySubApp:
                                   font=("Segoe UI", 10))
         self.tools_menu.add_command(label="🎬  MKV Altyazı Çıkar & Dönüştür", command=self._extract_subtitles_from_mkv_gui)
         self.tools_menu.add_command(label="🎙️  MKV Dublaj Değiştir", command=self._show_mkv_dub_changer_gui)
+        self.tools_menu.add_command(label="🎥  MKV -> MP4 Video Dönüştürücü", command=self._show_mkv_to_mp4_gui)
         self.tools_menu.add_separator()
         self.tools_menu.add_command(label="🔄  Toplu Altyazı Dönüştür (SRT / ASS / VTT / TXT)", command=self._show_subtitle_converter_gui)
         self.tools_menu.add_command(label="📌  Masaüstü Kısayolu Oluştur", command=self._create_desktop_shortcut)
@@ -1857,7 +2032,7 @@ class NollySubApp:
         # 4. MKVTOOLNIX SİSTEM DURUMU
         mmerge, mextract, _ = self.config.find_mkvtoolnix()
         mkv_card = tk.Frame(content_frame, bg=COLORS["bg_surface"], padx=14, pady=10, highlightthickness=1, highlightbackground=COLORS["border"])
-        mkv_card.pack(fill=tk.X)
+        mkv_card.pack(fill=tk.X, pady=(0, 12))
 
         if mmerge:
             mkv_status_lbl = tk.Label(mkv_card, text="🟢 MKVToolNix Tespit Edildi: MKV Altyazı & Dublaj araçları aktif.",
@@ -1877,6 +2052,30 @@ class NollySubApp:
                                    font=("Segoe UI", 9, "bold"), relief="flat", cursor="hand2",
                                    command=get_mkv)
             mkv_dl_btn.pack(side=tk.RIGHT)
+
+        # 5. FFMPEG SİSTEM DURUMU (MKV -> MP4 DÖNÜŞTÜRÜCÜ İÇİN)
+        ffmpeg_exe = self.config.find_ffmpeg()
+        ff_card = tk.Frame(content_frame, bg=COLORS["bg_surface"], padx=14, pady=10, highlightthickness=1, highlightbackground=COLORS["border"])
+        ff_card.pack(fill=tk.X)
+
+        if ffmpeg_exe:
+            ff_status_lbl = tk.Label(ff_card, text="🟢 FFmpeg Tespit Edildi: MKV -> MP4 Video Dönüştürücü aktif.",
+                                     bg=COLORS["bg_surface"], fg=COLORS["success"], font=("Segoe UI", 9, "bold"))
+            ff_status_lbl.pack(anchor=tk.W)
+        else:
+            ff_row = tk.Frame(ff_card, bg=COLORS["bg_surface"])
+            ff_row.pack(fill=tk.X)
+            ff_status_lbl = tk.Label(ff_row, text="⚠️ FFmpeg Bulunamadı: MKV -> MP4 video dönüştürücü için gereklidir.",
+                                     bg=COLORS["bg_surface"], fg=COLORS["warning"], font=("Segoe UI", 9))
+            ff_status_lbl.pack(side=tk.LEFT)
+
+            def get_ff():
+                webbrowser.open("https://ffmpeg.org/download.html")
+
+            ff_dl_btn = tk.Button(ff_row, text="📥 İndir", bg=COLORS["bg_elevated"], fg=COLORS["warning"],
+                                  font=("Segoe UI", 9, "bold"), relief="flat", cursor="hand2",
+                                  command=get_ff)
+            ff_dl_btn.pack(side=tk.RIGHT)
 
         # Alt Butonlar
         bottom_frame = tk.Frame(settings_win, bg=COLORS["bg_surface"], pady=12, padx=20)
@@ -2685,6 +2884,320 @@ class NollySubApp:
                               activebackground=COLORS["accent_hover"], activeforeground="white",
                               command=start_batch_conversion)
         btn_start.pack(side=tk.RIGHT, padx=(8, 0))
+
+        tk.Button(bottom_frame, text="Kapat", bg=COLORS["bg_elevated"], fg=COLORS["text_secondary"],
+                  font=("Segoe UI", 10), relief="flat", cursor="hand2", padx=14, pady=6,
+                  command=conv_win.destroy).pack(side=tk.RIGHT)
+
+
+    def _show_mkv_to_mp4_gui(self):
+        """MKV'den MP4'e video dönüştürme arayüzü (Hızlı Remux & Tam Kodlama desteği)."""
+        ffmpeg_bin = self.config.find_ffmpeg()
+        if not ffmpeg_bin:
+            messagebox.showerror(
+                "FFmpeg Bulunamadı",
+                "MKV -> MP4 video dönüştürme özelliği için sisteminizde FFmpeg kurulu veya erişilebilir olmalıdır."
+            )
+            return
+
+        conv_win = tk.Toplevel(self.root)
+        conv_win.title("🎥 NollySub — MKV -> MP4 Video Dönüştürücü")
+        conv_win.geometry("900x640")
+        conv_win.minsize(800, 540)
+        conv_win.configure(bg=COLORS["bg_surface"])
+        conv_win.transient(self.root)
+
+        # Üst Başlık
+        header_frame = tk.Frame(conv_win, bg=COLORS["bg_surface"], padx=20, pady=12)
+        header_frame.pack(fill=tk.X)
+
+        tk.Label(header_frame, text="🎥 MKV -> MP4 Video Dönüştürücü", bg=COLORS["bg_surface"],
+                 fg=COLORS["text_primary"], font=("Segoe UI", 13, "bold")).pack(anchor=tk.W)
+        tk.Label(header_frame, text="MKV formatındaki videoları kalite kaybı olmadan (saniyeler içinde) veya tam yeniden kodlama ile MP4 formatına dönüştürün.",
+                 bg=COLORS["bg_surface"], fg=COLORS["text_muted"], font=("Segoe UI", 9)).pack(anchor=tk.W, pady=(2, 0))
+
+        # 1. Ayarlar & Modlar Kartı
+        settings_card = tk.Frame(conv_win, bg=COLORS["bg_deep"], padx=14, pady=10, highlightthickness=1, highlightbackground=COLORS["border"])
+        settings_card.pack(fill=tk.X, padx=20, pady=(0, 8))
+
+        mode_lbl = tk.Label(settings_card, text="Dönüştürme Modu:", bg=COLORS["bg_deep"], fg=COLORS["text_primary"], font=("Segoe UI", 9, "bold"))
+        mode_lbl.pack(side=tk.LEFT, padx=(0, 10))
+
+        conv_mode_var = tk.StringVar(value="auto")
+
+        rb_auto = tk.Radiobutton(settings_card, text="🤖 Akıllı Otomatik (Önce Remux, Gerekirse Kodla)", variable=conv_mode_var, value="auto",
+                                 bg=COLORS["bg_deep"], fg=COLORS["text_primary"], selectcolor=COLORS["bg_surface"],
+                                 activebackground=COLORS["bg_deep"], activeforeground="white", font=("Segoe UI", 9))
+        rb_auto.pack(side=tk.LEFT, padx=(0, 10))
+
+        rb_fast = tk.Radiobutton(settings_card, text="⚡ Hızlı Remux (Saniyeler Sürer)", variable=conv_mode_var, value="fast",
+                                 bg=COLORS["bg_deep"], fg=COLORS["text_primary"], selectcolor=COLORS["bg_surface"],
+                                 activebackground=COLORS["bg_deep"], activeforeground="white", font=("Segoe UI", 9))
+        rb_fast.pack(side=tk.LEFT, padx=(0, 10))
+
+        rb_encode = tk.Radiobutton(settings_card, text="🎬 Tam Kodlama (H.264 + AAC)", variable=conv_mode_var, value="reencode",
+                                   bg=COLORS["bg_deep"], fg=COLORS["text_primary"], selectcolor=COLORS["bg_surface"],
+                                   activebackground=COLORS["bg_deep"], activeforeground="white", font=("Segoe UI", 9))
+        rb_encode.pack(side=tk.LEFT)
+
+        # 2. Üst Kontrol Çubuğu (Dosya/Klasör Ekle)
+        ctrl_frame = tk.Frame(conv_win, bg=COLORS["bg_surface"], padx=20, pady=4)
+        ctrl_frame.pack(fill=tk.X)
+
+        queue_items = {}
+        is_converting = [False]
+        cancel_event = threading.Event()
+        active_proc = [None]
+
+        def update_summary():
+            count = len(queue_items)
+            summary_label.config(text=f"Kuyrukta {count} adet MKV dosyası var")
+
+        def add_files(file_list=None):
+            if is_converting[0]:
+                messagebox.showwarning("Uyarı", "Dönüştürme işlemi devam ederken yeni dosya eklenemez.")
+                return
+            if not file_list:
+                file_list = filedialog.askopenfilenames(
+                    title="MKV Video Dosyaları Seçin",
+                    filetypes=[("MKV Video Dosyaları", "*.mkv")]
+                )
+            if not file_list:
+                return
+
+            existing_paths = {v["mkv_path"] for v in queue_items.values()}
+            for fpath in file_list:
+                norm_p = os.path.abspath(fpath)
+                if norm_p not in existing_paths and norm_p.lower().endswith(".mkv"):
+                    iid = f"item_{len(queue_items) + 1}_{hash(norm_p) & 0xfffffff}"
+                    fname = os.path.basename(norm_p)
+                    size_bytes = os.path.getsize(norm_p) if os.path.exists(norm_p) else 0
+                    if size_bytes > 1024 * 1024 * 1024:
+                        size_str = f"{size_bytes / (1024**3):.2f} GB"
+                    else:
+                        size_str = f"{size_bytes / (1024**2):.1f} MB"
+
+                    folder = os.path.dirname(norm_p)
+
+                    queue_items[iid] = {
+                        "mkv_path": norm_p,
+                        "filename": fname,
+                        "size_str": size_str,
+                        "status": "⏳ Bekliyor"
+                    }
+                    existing_paths.add(norm_p)
+
+                    tree.insert("", "end", iid=iid, values=(
+                        "⏳ Bekliyor",
+                        fname,
+                        size_str,
+                        conv_mode_var.get().upper(),
+                        folder
+                    ))
+            update_summary()
+
+        def add_folder():
+            if is_converting[0]:
+                messagebox.showwarning("Uyarı", "Dönüştürme işlemi devam ederken yeni klasör eklenemez.")
+                return
+            folder = filedialog.askdirectory(title="MKV Dosyalarını İçeren Klasörü Seçin")
+            if not folder:
+                return
+
+            found_files = []
+            for root, dirs, files in os.walk(folder):
+                for f in files:
+                    if f.lower().endswith(".mkv"):
+                        found_files.append(os.path.join(root, f))
+
+            if found_files:
+                add_files(found_files)
+            else:
+                messagebox.showinfo("Bilgi", "Seçilen klasörde MKV dosyası bulunamadı.")
+
+        def remove_selected():
+            if is_converting[0]:
+                messagebox.showwarning("Uyarı", "Dönüştürme işlemi devam ederken dosya silinemez.")
+                return
+            sel = tree.selection()
+            if not sel:
+                return
+            for iid in sel:
+                if iid in queue_items:
+                    del queue_items[iid]
+                tree.delete(iid)
+            update_summary()
+
+        def clear_all():
+            if is_converting[0]:
+                messagebox.showwarning("Uyarı", "Dönüştürme işlemi devam ederken liste temizlenemez.")
+                return
+            queue_items.clear()
+            for child in tree.get_children():
+                tree.delete(child)
+            update_summary()
+
+        btn_add_files = tk.Button(ctrl_frame, text="➕  MKV Dosyası Ekle", bg=COLORS["info"], fg="white",
+                                  font=("Segoe UI", 9, "bold"), relief="flat", cursor="hand2", padx=10, pady=4,
+                                  command=add_files)
+        btn_add_files.pack(side=tk.LEFT, padx=(0, 6))
+
+        btn_add_dir = tk.Button(ctrl_frame, text="📂  Klasör Ekle", bg=COLORS["bg_elevated"], fg=COLORS["text_primary"],
+                                font=("Segoe UI", 9), relief="flat", cursor="hand2", padx=10, pady=4,
+                                command=add_folder)
+        btn_add_dir.pack(side=tk.LEFT, padx=(0, 6))
+
+        btn_remove = tk.Button(ctrl_frame, text="🗑️  Seçileni Çıkar", bg=COLORS["bg_elevated"], fg=COLORS["text_secondary"],
+                               font=("Segoe UI", 9), relief="flat", cursor="hand2", padx=10, pady=4,
+                               command=remove_selected)
+        btn_remove.pack(side=tk.LEFT, padx=(0, 6))
+
+        btn_clear = tk.Button(ctrl_frame, text="🧹  Temizle", bg=COLORS["bg_elevated"], fg=COLORS["text_secondary"],
+                              font=("Segoe UI", 9), relief="flat", cursor="hand2", padx=10, pady=4,
+                              command=clear_all)
+        btn_clear.pack(side=tk.LEFT)
+
+        summary_label = tk.Label(ctrl_frame, text="Kuyrukta 0 adet MKV dosyası var", bg=COLORS["bg_surface"],
+                                 fg=COLORS["text_muted"], font=("Segoe UI", 9))
+        summary_label.pack(side=tk.RIGHT)
+
+        # 3. Liste (Treeview)
+        tree_container = tk.Frame(conv_win, bg=COLORS["bg_deep"], highlightthickness=1, highlightbackground=COLORS["border"])
+        tree_container.pack(fill=tk.BOTH, expand=True, padx=20, pady=6)
+
+        columns = ("status", "filename", "size", "mode", "folder")
+        tree = ttk.Treeview(tree_container, columns=columns, show="headings", style="Dark.Treeview", selectmode="extended")
+
+        tree.heading("status", text="Durum", anchor=tk.CENTER)
+        tree.heading("filename", text="Dosya Adı", anchor=tk.W)
+        tree.heading("size", text="Boyut", anchor=tk.CENTER)
+        tree.heading("mode", text="Mod", anchor=tk.CENTER)
+        tree.heading("folder", text="Klasör", anchor=tk.W)
+
+        tree.column("status", width=140, minwidth=110, stretch=False, anchor=tk.CENTER)
+        tree.column("filename", width=260, minwidth=160, stretch=True, anchor=tk.W)
+        tree.column("size", width=90, minwidth=70, stretch=False, anchor=tk.CENTER)
+        tree.column("mode", width=100, minwidth=80, stretch=False, anchor=tk.CENTER)
+        tree.column("folder", width=250, minwidth=150, stretch=True, anchor=tk.W)
+
+        scrollbar = ttk.Scrollbar(tree_container, orient=tk.VERTICAL, command=tree.yview, style="Dark.Vertical.TScrollbar")
+        tree.configure(yscrollcommand=scrollbar.set)
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # 4. İlerleme Çubuğu & Bilgi Paneli
+        progress_frame = tk.Frame(conv_win, bg=COLORS["bg_surface"], padx=20, pady=4)
+        progress_frame.pack(fill=tk.X)
+
+        status_lbl = tk.Label(progress_frame, text="Hazır. Başlatmak için dönüştürme butonuna tıklayın.",
+                              bg=COLORS["bg_surface"], fg=COLORS["text_secondary"], font=("Segoe UI", 9))
+        status_lbl.pack(anchor=tk.W, pady=(0, 2))
+
+        progress_bar = ttk.Progressbar(progress_frame, orient="horizontal", mode="determinate", style="Dark.Horizontal.TProgressbar")
+        progress_bar.pack(fill=tk.X)
+
+        # 5. Alt Butonlar Barı
+        bottom_frame = tk.Frame(conv_win, bg=COLORS["bg_surface"], pady=10, padx=20)
+        bottom_frame.pack(fill=tk.X, side=tk.BOTTOM)
+
+        def stop_conversion():
+            if is_converting[0]:
+                cancel_event.set()
+                if active_proc[0]:
+                    try:
+                        active_proc[0].kill()
+                    except Exception:
+                        pass
+                status_lbl.config(text="⚠️ İptal ediliyor...", fg=COLORS["warning"])
+
+        def start_conversion():
+            if not queue_items:
+                messagebox.showwarning("Kuyruk Boş", "Lütfen önce dönüştürülecek MKV dosyaları ekleyin.")
+                return
+
+            if is_converting[0]:
+                return
+
+            is_converting[0] = True
+            cancel_event.clear()
+            btn_start.config(state=tk.DISABLED, bg=COLORS["bg_elevated"])
+            btn_stop.config(state=tk.NORMAL, bg=COLORS["warning"])
+
+            mode = conv_mode_var.get()
+            items_list = list(queue_items.items())
+            total = len(items_list)
+            progress_bar["value"] = 0
+            progress_bar["maximum"] = total
+
+            def run_thread():
+                successful_count = 0
+                failed_count = 0
+
+                for index, (iid, item_data) in enumerate(items_list):
+                    if cancel_event.is_set():
+                        break
+
+                    mkv_p = item_data["mkv_path"]
+                    base_name = os.path.splitext(mkv_p)[0]
+                    out_mp4 = base_name + ".mp4"
+
+                    self.root.after(0, lambda _iid=iid, _idx=index+1: (
+                        tree.set(_iid, "status", "⏳ Dönüştürülüyor..."),
+                        tree.set(_iid, "mode", mode.upper()),
+                        status_lbl.config(text=f"Dönüştürülüyor [{_idx}/{total}]: {os.path.basename(mkv_p)}...", fg=COLORS["info"]),
+                        progress_bar.config(value=_idx - 1)
+                    ))
+
+                    def on_progress(p_str):
+                        if not cancel_event.is_set():
+                            self.root.after(0, lambda: status_lbl.config(text=f"[{index+1}/{total}] {os.path.basename(mkv_p)} — {p_str}", fg=COLORS["info"]))
+
+                    ok, msg = MkvToMp4Converter.convert(
+                        mkv_path=mkv_p,
+                        output_mp4=out_mp4,
+                        ffmpeg_bin=ffmpeg_bin,
+                        mode=mode,
+                        progress_callback=on_progress,
+                        cancel_event=cancel_event,
+                        proc_holder=active_proc
+                    )
+
+                    if cancel_event.is_set():
+                        self.root.after(0, lambda _iid=iid: tree.set(_iid, "status", "❌ İptal Edildi"))
+                        break
+
+                    if ok:
+                        successful_count += 1
+                        self.root.after(0, lambda _iid=iid: tree.set(_iid, "status", "✅ Tamamlandı"))
+                    else:
+                        failed_count += 1
+                        err_brief = f"❌ Hata ({msg[:30]})" if msg else "❌ Hata"
+                        self.root.after(0, lambda _iid=iid, _err=err_brief: tree.set(_iid, "status", _err))
+
+                    self.root.after(0, lambda _idx=index+1: progress_bar.config(value=_idx))
+
+                is_converting[0] = False
+                self.root.after(0, lambda: (
+                    btn_start.config(state=tk.NORMAL, bg=COLORS["accent"]),
+                    btn_stop.config(state=tk.DISABLED, bg=COLORS["bg_elevated"]),
+                    status_lbl.config(
+                        text=f"İşlem bitti. Tamamlanan: {successful_count}, Hatalı/İptal: {failed_count}" if not cancel_event.is_set() else "İşlem kullanıcı tarafından iptal edildi.",
+                        fg=COLORS["success"] if successful_count > 0 and failed_count == 0 else COLORS["warning"]
+                    )
+                ))
+
+            threading.Thread(target=run_thread, daemon=True).start()
+
+        btn_start = tk.Button(bottom_frame, text="🚀  Dönüştürmeyi Başlat", bg=COLORS["accent"], fg="white",
+                              font=("Segoe UI", 10, "bold"), relief="flat", cursor="hand2", padx=16, pady=6,
+                              activebackground=COLORS["accent_hover"], activeforeground="white",
+                              command=start_conversion)
+        btn_start.pack(side=tk.RIGHT, padx=(8, 0))
+
+        btn_stop = tk.Button(bottom_frame, text="⏹️  Durdur", bg=COLORS["bg_elevated"], fg="white",
+                             font=("Segoe UI", 10, "bold"), relief="flat", cursor="hand2", padx=14, pady=6,
+                             state=tk.DISABLED, command=stop_conversion)
+        btn_stop.pack(side=tk.RIGHT, padx=(8, 0))
 
         tk.Button(bottom_frame, text="Kapat", bg=COLORS["bg_elevated"], fg=COLORS["text_secondary"],
                   font=("Segoe UI", 10), relief="flat", cursor="hand2", padx=14, pady=6,
