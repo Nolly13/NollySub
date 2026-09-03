@@ -240,6 +240,42 @@ class ConfigManager:
 
         return None
 
+    def find_ffprobe(self):
+        """Sistemdeki veya FFmpeg klasöründeki ffprobe yolunu bulur."""
+        ffmpeg_bin = self.find_ffmpeg()
+        if ffmpeg_bin:
+            folder = os.path.dirname(ffmpeg_bin)
+            probe = os.path.join(folder, "ffprobe.exe" if sys.platform == "win32" else "ffprobe")
+            if os.path.exists(probe):
+                return probe
+
+        sys_probe = shutil.which("ffprobe")
+        if sys_probe and os.path.exists(sys_probe):
+            return sys_probe
+
+        local_app_data = os.environ.get("LOCALAPPDATA", "")
+        if local_app_data:
+            winget_dir = os.path.join(local_app_data, "Microsoft", "WinGet", "Packages")
+            if os.path.exists(winget_dir):
+                for root, dirs, files in os.walk(winget_dir):
+                    if "ffprobe.exe" in files:
+                        return os.path.join(root, "ffprobe.exe")
+
+        possible_paths = [
+            r"C:\Program Files\ffmpeg\bin\ffprobe.exe",
+            r"C:\Program Files (x86)\ffmpeg\bin\ffprobe.exe",
+            r"C:\ffmpeg\bin\ffprobe.exe",
+            os.path.join(os.getcwd(), "ffprobe.exe"),
+            os.path.join(os.getcwd(), "ffprobe", "bin", "ffprobe.exe"),
+        ]
+
+        for path in possible_paths:
+            if path and os.path.exists(path):
+                return path
+
+        return None
+
+
 
 
 # ══════════════════════════════════════════════════════
@@ -1121,40 +1157,89 @@ class SubtitleConverter:
 # ══════════════════════════════════════════════════════
 
 class MkvTools:
-    """MKV dosyalarından altyazı çıkarma ve dublaj/ses parçası değiştirme işlemleri."""
+    """MKV ve MP4 dosyalarından altyazı çıkarma ve dublaj/ses parçası değiştirme işlemleri."""
 
     @staticmethod
-    def get_tracks(mkv_path, mkvmerge_bin):
-        """MKV dosyasındaki tüm parçaları (Video, Ses, Altyazı) listeler."""
-        cmd = [mkvmerge_bin, "-J", mkv_path]
-        res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore")
-        if res.returncode != 0:
-            raise Exception("MKV dosyası okunamadı.")
+    def get_tracks(media_path, mkvmerge_bin=None, ffprobe_bin=None):
+        """Media dosyasındaki (MKV, MP4 vb.) tüm parçaları (Video, Ses, Altyazı) listeler.
+        MKVToolNix (mkvmerge) veya FFmpeg (ffprobe) kullanarak parçaları döndürür.
+        """
+        # 1. Deneme: mkvmerge (varsa)
+        if mkvmerge_bin and (os.path.exists(mkvmerge_bin) or shutil.which(mkvmerge_bin)):
+            try:
+                cmd = [mkvmerge_bin, "-J", media_path]
+                res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore")
+                if res.returncode == 0 and res.stdout.strip():
+                    info = json.loads(res.stdout)
+                    tracks = []
+                    for t in info.get("tracks", []):
+                        props = t.get("properties", {})
+                        lang_ietf = props.get("language_ietf", "")
+                        lang_raw = props.get("language", "")
+                        lang = lang_ietf or lang_raw or "und"
+                        tracks.append({
+                            "id": t["id"],
+                            "type": t["type"],
+                            "codec": t.get("codec", ""),
+                            "language": lang,
+                            "language_ietf": lang_ietf,
+                            "language_raw": lang_raw,
+                            "name": props.get("track_name", ""),
+                            "default": props.get("default_track", False),
+                            "forced": props.get("forced_track", False),
+                        })
+                    return tracks
+            except Exception as e:
+                print(f"mkvmerge get_tracks hatası: {e}")
 
-        info = json.loads(res.stdout)
-        tracks = []
-        for t in info.get("tracks", []):
-            props = t.get("properties", {})
-            lang_ietf = props.get("language_ietf", "")
-            lang_raw = props.get("language", "")
-            lang = lang_ietf or lang_raw or "und"
-            tracks.append({
-                "id": t["id"],
-                "type": t["type"],
-                "codec": t.get("codec", ""),
-                "language": lang,
-                "language_ietf": lang_ietf,
-                "language_raw": lang_raw,
-                "name": props.get("track_name", ""),
-                "default": props.get("default_track", False),
-                "forced": props.get("forced_track", False),
-            })
-        return tracks
+        # 2. Deneme: ffprobe (Özellikle MP4 ve mkvmerge olmayan sistemler için)
+        if not ffprobe_bin:
+            ffprobe_bin = shutil.which("ffprobe")
+
+        if ffprobe_bin and (os.path.exists(ffprobe_bin) or shutil.which(ffprobe_bin)):
+            try:
+                cmd = [ffprobe_bin, "-v", "error", "-show_streams", "-show_format", "-of", "json", media_path]
+                res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore")
+                if res.returncode == 0 and res.stdout.strip():
+                    info = json.loads(res.stdout)
+                    tracks = []
+                    for stream in info.get("streams", []):
+                        ctype = stream.get("codec_type", "").lower()
+                        if ctype == "subtitle":
+                            stype = "subtitles"
+                        elif ctype in ("video", "audio"):
+                            stype = ctype
+                        else:
+                            stype = ctype
+
+                        tags = stream.get("tags", {})
+                        lang = tags.get("language") or tags.get("LANG") or "und"
+                        title = tags.get("title") or tags.get("handler_name") or ""
+                        disp = stream.get("disposition", {})
+                        is_def = bool(disp.get("default", 0))
+                        is_forced = bool(disp.get("forced", 0))
+
+                        tracks.append({
+                            "id": stream.get("index", 0),
+                            "type": stype,
+                            "codec": stream.get("codec_name", ""),
+                            "language": lang,
+                            "language_ietf": lang,
+                            "language_raw": lang,
+                            "name": title,
+                            "default": is_def,
+                            "forced": is_forced,
+                        })
+                    return tracks
+            except Exception as e:
+                print(f"ffprobe get_tracks hatası: {e}")
+
+        raise Exception("Video dosyası okunamadı (MKVToolNix veya FFprobe bulunamadı ya da dosya okunamıyor).")
 
     @staticmethod
-    def extract_subtitles(mkv_path, output_dir, mkvextract_bin, mkvmerge_bin):
-        """MKV içindeki gömülü altyazıları dışarı aktarır."""
-        tracks = MkvTools.get_tracks(mkv_path, mkvmerge_bin)
+    def extract_subtitles(mkv_path, output_dir, mkvextract_bin, mkvmerge_bin, ffprobe_bin=None):
+        """MKV/MP4 içindeki gömülü altyazıları dışarı aktarır."""
+        tracks = MkvTools.get_tracks(mkv_path, mkvmerge_bin=mkvmerge_bin, ffprobe_bin=ffprobe_bin)
         sub_tracks = [t for t in tracks if t["type"] == "subtitles"]
 
         if not sub_tracks:
@@ -1186,33 +1271,42 @@ class MkvTools:
         return extracted
 
     @staticmethod
-    def set_default_audio(mkv_path, audio_track_id, mkvpropedit_bin=None, mkvmerge_bin=None, ffmpeg_bin=None, target_lang=None):
-        """MKV/MP4 içindeki varsayılan ses (dublaj) izini değiştirir ve tüm oynatıcılar (Windows Media Player dahil) için fiziki olarak en başa taşır."""
-        if not mkvmerge_bin:
-            mkvmerge_bin = shutil.which("mkvmerge") or "mkvmerge"
-        if not mkvpropedit_bin:
-            mkvpropedit_bin = shutil.which("mkvpropedit") or "mkvpropedit"
+    def set_default_audio(mkv_path, audio_track_id, mkvpropedit_bin=None, mkvmerge_bin=None, ffmpeg_bin=None, target_lang=None, ffprobe_bin=None):
+        """MKV/MP4 içindeki varsayılan ses (dublaj) izini değiştirir ve tüm oynatıcılar için fiziki olarak en başa taşır."""
         if not ffmpeg_bin:
             ffmpeg_bin = shutil.which("ffmpeg") or "ffmpeg"
+        if not ffprobe_bin:
+            ffprobe_bin = shutil.which("ffprobe") or "ffprobe"
 
         try:
-            tracks = MkvTools.get_tracks(mkv_path, mkvmerge_bin)
-        except Exception:
+            tracks = MkvTools.get_tracks(mkv_path, mkvmerge_bin=mkvmerge_bin, ffprobe_bin=ffprobe_bin)
+        except Exception as e:
+            print(f"set_default_audio tracks okuma hatası: {e}")
             tracks = []
 
         audio_tracks = [t for t in tracks if t["type"] == "audio"]
+        if not audio_tracks:
+            return False
 
         target_id = audio_track_id
 
-        # Eğer hedef dil belirtildiyse, bu dosyada o dildeki ses izini otomatik bul
-        if target_lang and audio_tracks:
+        # 1. Hedef dille eşleşen iz var mı?
+        if target_lang:
             for t in audio_tracks:
                 if match_audio_track_lang(t, target_lang):
                     target_id = t["id"]
                     break
 
-        # MP4 dosyası özel işleme (FFmpeg stream copy ile yeniden kodlamadan iz sırası değiştirme)
-        if str(mkv_path).lower().endswith((".mp4", ".m4v")):
+        # 2. Eğer target_id audio_tracks içinde bulunamazsa (örn. batch dosyalarda ID farkı varsa), relatif index kullanarak eşleştir
+        if not any(t["id"] == target_id for t in audio_tracks):
+            if 0 <= audio_track_id < len(audio_tracks):
+                target_id = audio_tracks[audio_track_id]["id"]
+            else:
+                target_id = audio_tracks[0]["id"]
+
+        # MP4 / M4V / MOV veya MKVToolNix olmayan sistemlerde FFmpeg Stream Copy ile iz sırasını değiştirme
+        is_mp4 = str(mkv_path).lower().endswith((".mp4", ".m4v", ".mov"))
+        if is_mp4 or (not mkvmerge_bin and not mkvpropedit_bin):
             if ffmpeg_bin and (os.path.exists(ffmpeg_bin) or shutil.which(ffmpeg_bin)):
                 try:
                     target_rel_idx = 0
@@ -1221,42 +1315,43 @@ class MkvTools:
                             target_rel_idx = idx
                             break
 
-                    total_audio = len(audio_tracks) if audio_tracks else 1
-                    temp_mp4 = str(mkv_path) + ".tmp_nolly.mp4"
+                    total_audio = len(audio_tracks)
+                    ext = os.path.splitext(mkv_path)[1]
+                    temp_out = str(mkv_path) + f".tmp_nolly{ext}"
+
                     cmd = [ffmpeg_bin, "-y", "-i", mkv_path, "-c", "copy", "-map", "0:v?"]
+                    # Selected audio stream as output 0:a:0
                     cmd.extend(["-map", f"0:a:{target_rel_idx}"])
+                    # Remaining audio streams
                     for idx in range(total_audio):
                         if idx != target_rel_idx:
                             cmd.extend(["-map", f"0:a:{idx}"])
-                    cmd.extend(["-map", "0:s?"])
+                    cmd.extend(["-map", "0:s?", "-map", "0:d?"])
 
+                    # Update dispositions
                     for idx in range(total_audio):
                         disp_val = "default" if idx == 0 else "0"
                         cmd.extend([f"-disposition:a:{idx}", disp_val])
 
-                    cmd.append(temp_mp4)
+                    if is_mp4:
+                        cmd.extend(["-movflags", "+faststart"])
+
+                    cmd.append(temp_out)
                     creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
                     res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore", creationflags=creation_flags)
-                    if res.returncode == 0 and os.path.exists(temp_mp4) and os.path.getsize(temp_mp4) > 0:
-                        os.replace(temp_mp4, mkv_path)
+                    if res.returncode == 0 and os.path.exists(temp_out) and os.path.getsize(temp_out) > 0:
+                        os.replace(temp_out, mkv_path)
                         return True
                     else:
-                        if os.path.exists(temp_mp4):
+                        if os.path.exists(temp_out):
                             try:
-                                os.remove(temp_mp4)
+                                os.remove(temp_out)
                             except Exception:
                                 pass
                 except Exception as e:
-                    print(f"FFmpeg MP4 ses izi reorder hatası: {e}")
+                    print(f"FFmpeg ses izi reorder hatası: {e}")
 
-        if not audio_tracks:
-            if mkvpropedit_bin and (os.path.exists(mkvpropedit_bin) or shutil.which(mkvpropedit_bin)):
-                cmd = [mkvpropedit_bin, mkv_path, "--edit", f"track:{audio_track_id + 1}", "--set", "flag-default=1"]
-                res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore")
-                return res.returncode == 0
-            return False
-
-        # 1. YÖNTEM: mkvmerge ile fiziksel iz sırasını değiştir (Windows Medya Oynatıcısı gibi 1. izi okuyan oynatıcılar için)
+        # MKV Dosyaları için MKVToolNix Kullanımı (mkvmerge veya mkvpropedit varsa)
         if mkvmerge_bin and (os.path.exists(mkvmerge_bin) or shutil.which(mkvmerge_bin)):
             try:
                 video_tracks = [t["id"] for t in tracks if t["type"] == "video"]
@@ -1288,19 +1383,17 @@ class MkvTools:
             except Exception as e:
                 print(f"mkvmerge remux hatası: {e}")
 
-        # 2. YÖNTEM: mkvpropedit ile başlık ve bayrakları güncelle (Hızlı Fallback)
         if mkvpropedit_bin and (os.path.exists(mkvpropedit_bin) or shutil.which(mkvpropedit_bin)):
             cmd = [mkvpropedit_bin, mkv_path]
             for idx, t in enumerate(audio_tracks):
                 is_def = "1" if t["id"] == target_id else "0"
                 cmd.extend(["--edit", f"track:a{idx + 1}", "--set", f"flag-default={is_def}"])
-                if t["id"] == target_id:
-                    cmd.extend(["--set", "language=tur", "--set", "language-ietf=tr"])
 
             res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore")
             return res.returncode == 0
 
         return False
+
 
 
 class MkvToMp4Converter:
@@ -2460,7 +2553,8 @@ class NollySubApp:
         """MKV / MP4 dublaj/ses izi değiştirici arayüzü (Tam Çalışan Sürüm)."""
         mmerge, _, mpropedit = self.config.find_mkvtoolnix()
         ffmpeg_bin = self.config.find_ffmpeg()
-        if not mpropedit and not ffmpeg_bin:
+        ffprobe_bin = self.config.find_ffprobe()
+        if not mpropedit and not ffmpeg_bin and not ffprobe_bin:
             messagebox.showerror(
                 "Gerekli Araçlar Bulunamadı",
                 "Dublaj değiştirme özelliği için sisteminizde MKVToolNix veya FFmpeg kurulu olmalıdır."
@@ -2523,7 +2617,7 @@ class NollySubApp:
                 return
 
             try:
-                all_t = MkvTools.get_tracks(selected_files[0], mmerge)
+                all_t = MkvTools.get_tracks(selected_files[0], mkvmerge_bin=mmerge, ffprobe_bin=ffprobe_bin)
                 audio_tracks = [t for t in all_t if t["type"] == "audio"]
 
                 if not audio_tracks:
@@ -2538,7 +2632,7 @@ class NollySubApp:
                         break
                 selected_audio_id.set(def_id)
 
-                for t in audio_tracks:
+                for idx, t in enumerate(audio_tracks):
                     tid = t["id"]
                     lang_str = get_lang_display(t["language"])
                     name_str = t["name"] or "-"
@@ -2553,7 +2647,7 @@ class NollySubApp:
                                         bg=COLORS["bg_surface"], selectcolor=COLORS["bg_deep"], activebackground=COLORS["bg_surface"])
                     rb.pack(side=tk.LEFT)
 
-                    lbl_txt = f"Ses İzi #{tid+1}  |  Dil: {lang_str}  |  Format: {codec_str}  |  İsim: {name_str}"
+                    lbl_txt = f"Ses İzi #{idx + 1} (ID: {tid})  |  Dil: {lang_str}  |  Format: {codec_str}  |  İsim: {name_str}"
                     if is_def:
                         lbl_txt += "  🟢 [Mevcut Varsayılan]"
 
@@ -2613,7 +2707,7 @@ class NollySubApp:
             success_count = 0
             for fpath in selected_files:
                 try:
-                    if MkvTools.set_default_audio(fpath, target_id, mpropedit, mmerge, ffmpeg_bin=ffmpeg_bin, target_lang=target_lang):
+                    if MkvTools.set_default_audio(fpath, target_id, mpropedit, mmerge, ffmpeg_bin=ffmpeg_bin, target_lang=target_lang, ffprobe_bin=ffprobe_bin):
                         success_count += 1
                 except Exception as e:
                     print(f"Hata ({fpath}): {e}")
@@ -2631,6 +2725,7 @@ class NollySubApp:
         tk.Button(bottom_frame, text="Kapat", bg=COLORS["bg_elevated"], fg=COLORS["text_secondary"],
                   font=("Segoe UI", 10), relief="flat", cursor="hand2", padx=14, pady=6,
                   command=dub_win.destroy).pack(side=tk.RIGHT, padx=8)
+
 
     def _show_subtitle_converter_gui(self):
         """Toplu altyazı format dönüştürücü arayüzü (SRT, ASS, VTT, TXT)."""
