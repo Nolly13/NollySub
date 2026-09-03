@@ -1309,6 +1309,11 @@ class MkvTools:
             else:
                 target_id = audio_tracks[min(audio_track_id, len(audio_tracks) - 1) if audio_tracks else 0]["id"]
 
+        # Varsayılan dil etiketi belirleme (Eğer hedef dil verilmediyse varsayılan "tur" / Türkçe ayarla)
+        eff_lang = str(target_lang).strip().lower() if target_lang else "tur"
+        if eff_lang in ("und", "unk", "unknown", "none", ""):
+            eff_lang = "tur"
+
         # MP4 / M4V / MOV veya MKVToolNix olmayan sistemlerde FFmpeg Stream Copy ile iz sırasını değiştirme
         is_mp4 = str(mkv_path).lower().endswith((".mp4", ".m4v", ".mov"))
         if is_mp4 or (not mkvmerge_bin and not mkvpropedit_bin):
@@ -1338,11 +1343,12 @@ class MkvTools:
                         disp_val = "default" if idx == 0 else "0"
                         cmd.extend([f"-disposition:a:{idx}", disp_val])
 
-                    selected_track_info = next((t for t in audio_tracks if t["id"] == target_id), None)
-                    if selected_track_info:
-                        t_lang = selected_track_info.get("language") or target_lang
-                        if t_lang and str(t_lang).lower() not in ("und", "unk", ""):
-                            cmd.extend(["-metadata:s:a:0", f"language={t_lang}"])
+                    # 1. Ses izinin dil etiketini Türkçe/Hedef Dil olarak kesin güncelle
+                    cmd.extend(["-metadata:s:a:0", f"language={eff_lang}"])
+
+                    # Diğer ses izlerinde 'tur' etiketi varsa onları temizle (Windows Media Player çakışmasını önlemek için)
+                    for idx in range(1, total_audio):
+                        cmd.extend(["-metadata:s:a:{idx}".format(idx=idx), "language=und"])
 
                     if is_mp4:
                         cmd.extend(["-movflags", "+faststart"])
