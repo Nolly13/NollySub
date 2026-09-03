@@ -1186,12 +1186,14 @@ class MkvTools:
         return extracted
 
     @staticmethod
-    def set_default_audio(mkv_path, audio_track_id, mkvpropedit_bin, mkvmerge_bin=None, target_lang=None):
-        """MKV içindeki varsayılan ses (dublaj) izini değiştirir ve tüm oynatıcılar (Windows Media Player dahil) için fiziki olarak en başa taşır."""
+    def set_default_audio(mkv_path, audio_track_id, mkvpropedit_bin=None, mkvmerge_bin=None, ffmpeg_bin=None, target_lang=None):
+        """MKV/MP4 içindeki varsayılan ses (dublaj) izini değiştirir ve tüm oynatıcılar (Windows Media Player dahil) için fiziki olarak en başa taşır."""
         if not mkvmerge_bin:
             mkvmerge_bin = shutil.which("mkvmerge") or "mkvmerge"
         if not mkvpropedit_bin:
             mkvpropedit_bin = shutil.which("mkvpropedit") or "mkvpropedit"
+        if not ffmpeg_bin:
+            ffmpeg_bin = shutil.which("ffmpeg") or "ffmpeg"
 
         try:
             tracks = MkvTools.get_tracks(mkv_path, mkvmerge_bin)
@@ -1199,21 +1201,60 @@ class MkvTools:
             tracks = []
 
         audio_tracks = [t for t in tracks if t["type"] == "audio"]
+
+        target_id = audio_track_id
+
+        # Eğer hedef dil belirtildiyse, bu dosyada o dildeki ses izini otomatik bul
+        if target_lang and audio_tracks:
+            for t in audio_tracks:
+                if match_audio_track_lang(t, target_lang):
+                    target_id = t["id"]
+                    break
+
+        # MP4 dosyası özel işleme (FFmpeg stream copy ile yeniden kodlamadan iz sırası değiştirme)
+        if str(mkv_path).lower().endswith((".mp4", ".m4v")):
+            if ffmpeg_bin and (os.path.exists(ffmpeg_bin) or shutil.which(ffmpeg_bin)):
+                try:
+                    target_rel_idx = 0
+                    for idx, t in enumerate(audio_tracks):
+                        if t["id"] == target_id:
+                            target_rel_idx = idx
+                            break
+
+                    total_audio = len(audio_tracks) if audio_tracks else 1
+                    temp_mp4 = str(mkv_path) + ".tmp_nolly.mp4"
+                    cmd = [ffmpeg_bin, "-y", "-i", mkv_path, "-c", "copy", "-map", "0:v?"]
+                    cmd.extend(["-map", f"0:a:{target_rel_idx}"])
+                    for idx in range(total_audio):
+                        if idx != target_rel_idx:
+                            cmd.extend(["-map", f"0:a:{idx}"])
+                    cmd.extend(["-map", "0:s?"])
+
+                    for idx in range(total_audio):
+                        disp_val = "default" if idx == 0 else "0"
+                        cmd.extend([f"-disposition:a:{idx}", disp_val])
+
+                    cmd.append(temp_mp4)
+                    creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+                    res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore", creationflags=creation_flags)
+                    if res.returncode == 0 and os.path.exists(temp_mp4) and os.path.getsize(temp_mp4) > 0:
+                        os.replace(temp_mp4, mkv_path)
+                        return True
+                    else:
+                        if os.path.exists(temp_mp4):
+                            try:
+                                os.remove(temp_mp4)
+                            except Exception:
+                                pass
+                except Exception as e:
+                    print(f"FFmpeg MP4 ses izi reorder hatası: {e}")
+
         if not audio_tracks:
             if mkvpropedit_bin and (os.path.exists(mkvpropedit_bin) or shutil.which(mkvpropedit_bin)):
                 cmd = [mkvpropedit_bin, mkv_path, "--edit", f"track:{audio_track_id + 1}", "--set", "flag-default=1"]
                 res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore")
                 return res.returncode == 0
             return False
-
-        target_id = audio_track_id
-
-        # Eğer hedef dil belirtildiyse, bu MKV dosyasında o dildeki ses izini otomatik bul
-        if target_lang:
-            for t in audio_tracks:
-                if match_audio_track_lang(t, target_lang):
-                    target_id = t["id"]
-                    break
 
         # 1. YÖNTEM: mkvmerge ile fiziksel iz sırasını değiştir (Windows Medya Oynatıcısı gibi 1. izi okuyan oynatıcılar için)
         if mkvmerge_bin and (os.path.exists(mkvmerge_bin) or shutil.which(mkvmerge_bin)):
@@ -1527,7 +1568,7 @@ class NollySubApp:
                                   activebackground=COLORS["accent"], activeforeground="white",
                                   font=("Segoe UI", 10))
         self.tools_menu.add_command(label="🎬  MKV Altyazı Çıkar & Dönüştür", command=self._extract_subtitles_from_mkv_gui)
-        self.tools_menu.add_command(label="🎙️  MKV Dublaj Değiştir", command=self._show_mkv_dub_changer_gui)
+        self.tools_menu.add_command(label="🎙️  MKV / MP4 Dublaj Değiştir", command=self._show_mkv_dub_changer_gui)
         self.tools_menu.add_command(label="🎥  MKV -> MP4 Video Dönüştürücü", command=self._show_mkv_to_mp4_gui)
         self.tools_menu.add_separator()
         self.tools_menu.add_command(label="🔄  Toplu Altyazı Dönüştür (SRT / ASS / VTT / TXT)", command=self._show_subtitle_converter_gui)
@@ -2416,17 +2457,18 @@ class NollySubApp:
                   command=sub_win.destroy).pack(side=tk.RIGHT, padx=8)
 
     def _show_mkv_dub_changer_gui(self):
-        """MKV dublaj/ses izi değiştirici arayüzü (Tam Çalışan Sürüm)."""
+        """MKV / MP4 dublaj/ses izi değiştirici arayüzü (Tam Çalışan Sürüm)."""
         mmerge, _, mpropedit = self.config.find_mkvtoolnix()
-        if not mpropedit:
+        ffmpeg_bin = self.config.find_ffmpeg()
+        if not mpropedit and not ffmpeg_bin:
             messagebox.showerror(
-                "MKVToolNix Bulunamadı",
-                "Dublaj değiştirme özelliği için sisteminizde MKVToolNix kurulu olmalıdır."
+                "Gerekli Araçlar Bulunamadı",
+                "Dublaj değiştirme özelliği için sisteminizde MKVToolNix veya FFmpeg kurulu olmalıdır."
             )
             return
 
         dub_win = tk.Toplevel(self.root)
-        dub_win.title("🎙️ NollySub — MKV Dublaj & Ses İzi Değiştirici")
+        dub_win.title("🎙️ NollySub — MKV / MP4 Dublaj & Ses İzi Değiştirici")
         dub_win.geometry("740x540")
         dub_win.configure(bg=COLORS["bg_surface"])
         dub_win.transient(self.root)
@@ -2435,9 +2477,9 @@ class NollySubApp:
         header_frame = tk.Frame(dub_win, bg=COLORS["bg_surface"], padx=20, pady=15)
         header_frame.pack(fill=tk.X)
 
-        tk.Label(header_frame, text="🎙️ MKV Varsayılan Ses İzi (Dublaj) Ayarlayıcı", bg=COLORS["bg_surface"],
+        tk.Label(header_frame, text="🎙️ MKV / MP4 Varsayılan Ses İzi (Dublaj) Ayarlayıcı", bg=COLORS["bg_surface"],
                  fg=COLORS["text_primary"], font=("Segoe UI", 13, "bold")).pack(anchor=tk.W)
-        tk.Label(header_frame, text="MKV dosyasındaki varsayılan ses izini (Japonca, Türkçe, İngilizce vb.) doğrudan günceller.",
+        tk.Label(header_frame, text="MKV ve MP4 videolarındaki varsayılan ses izini (Japonca, Türkçe, İngilizce vb.) doğrudan günceller.",
                  bg=COLORS["bg_surface"], fg=COLORS["text_muted"], font=("Segoe UI", 9)).pack(anchor=tk.W, pady=(2, 0))
 
         # Dosya Seçim Alanı
@@ -2476,7 +2518,7 @@ class NollySubApp:
                 widget.destroy()
 
             if not selected_files:
-                tk.Label(inner_tracks_frame, text="Lütfen yukarıdaki butondan bir MKV dosyası seçin.",
+                tk.Label(inner_tracks_frame, text="Lütfen yukarıdaki butondan bir MKV veya MP4 dosyası seçin.",
                          bg=COLORS["bg_deep"], fg=COLORS["text_muted"], font=("Segoe UI", 10)).pack(pady=40)
                 return
 
@@ -2521,24 +2563,29 @@ class NollySubApp:
                     lbl.pack(side=tk.LEFT, padx=8)
 
             except Exception as e:
-                tk.Label(inner_tracks_frame, text=f"MKV dosyası okunamadı: {e}",
+                tk.Label(inner_tracks_frame, text=f"Video dosyası okunamadı: {e}",
                          bg=COLORS["bg_deep"], fg=COLORS["accent"], font=("Segoe UI", 9)).pack(pady=20)
 
         def browse_mkv():
             nonlocal selected_files
             files = filedialog.askopenfilenames(
-                title="MKV Dosyası veya Dosyaları Seçin",
-                filetypes=[("MKV Video Dosyaları", "*.mkv")]
+                title="MKV / MP4 Video Dosyası veya Dosyaları Seçin",
+                filetypes=[
+                    ("Video Dosyaları (*.mkv, *.mp4)", "*.mkv;*.mp4"),
+                    ("MKV Video Dosyaları", "*.mkv"),
+                    ("MP4 Video Dosyaları", "*.mp4"),
+                    ("Tüm Dosyalar", "*.*")
+                ]
             )
             if files:
                 selected_files = list(files)
                 if len(selected_files) == 1:
                     file_label_var.set(f"📄 {os.path.basename(selected_files[0])}")
                 else:
-                    file_label_var.set(f"📁 Toplam {len(selected_files)} adet MKV dosyası seçildi")
+                    file_label_var.set(f"📁 Toplam {len(selected_files)} adet video dosyası seçildi")
                 load_mkv_tracks()
 
-        tk.Button(file_card, text="📁 MKV Dosyası Seç", bg=COLORS["accent"], fg="white",
+        tk.Button(file_card, text="📁 Video Dosyası Seç (MKV / MP4)", bg=COLORS["accent"], fg="white",
                   font=("Segoe UI", 9, "bold"), relief="flat", cursor="hand2", padx=12, pady=4,
                   command=browse_mkv).pack(side=tk.RIGHT)
 
@@ -2550,7 +2597,7 @@ class NollySubApp:
 
         def apply_default_audio():
             if not selected_files:
-                messagebox.showwarning("Uyarı", "Lütfen en az bir MKV dosyası seçin.")
+                messagebox.showwarning("Uyarı", "Lütfen en az bir video dosyası seçin.")
                 return
             target_id = selected_audio_id.get()
             if target_id < 0:
@@ -2566,13 +2613,13 @@ class NollySubApp:
             success_count = 0
             for fpath in selected_files:
                 try:
-                    if MkvTools.set_default_audio(fpath, target_id, mpropedit, mmerge, target_lang=target_lang):
+                    if MkvTools.set_default_audio(fpath, target_id, mpropedit, mmerge, ffmpeg_bin=ffmpeg_bin, target_lang=target_lang):
                         success_count += 1
                 except Exception as e:
                     print(f"Hata ({fpath}): {e}")
 
             if success_count > 0:
-                messagebox.showinfo("Başarılı 🎉", f"Toplam {success_count} MKV dosyasında varsayılan ses izi (dublaj) başarıyla güncellendi!")
+                messagebox.showinfo("Başarılı 🎉", f"Toplam {success_count} video dosyasında varsayılan ses izi (dublaj) başarıyla güncellendi!")
                 load_mkv_tracks()
             else:
                 messagebox.showerror("Hata", "Varsayılan ses izi güncellenirken bir hata oluştu.")
@@ -2940,6 +2987,42 @@ class NollySubApp:
                                    activebackground=COLORS["bg_deep"], activeforeground="white", font=("Segoe UI", 9))
         rb_encode.pack(side=tk.LEFT)
 
+        # Çıktı Konumu Ayarları
+        out_mode_var = tk.StringVar(value="same")
+        custom_dir_var = tk.StringVar(value="")
+
+        out_frame = tk.Frame(settings_card, bg=COLORS["bg_deep"], pady=4)
+        out_frame.pack(fill=tk.X, pady=(6, 0))
+
+        tk.Label(out_frame, text="📁 Çıktı Konumu:", bg=COLORS["bg_deep"], fg=COLORS["text_primary"],
+                 font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT, padx=(0, 10))
+
+        rb_out_same = tk.Radiobutton(out_frame, text="Orijinal Klasör (Yanına Kaydet)", variable=out_mode_var, value="same",
+                                     bg=COLORS["bg_deep"], fg=COLORS["text_primary"], selectcolor=COLORS["bg_surface"],
+                                     activebackground=COLORS["bg_deep"], activeforeground="white", font=("Segoe UI", 9))
+        rb_out_same.pack(side=tk.LEFT, padx=(0, 10))
+
+        rb_out_custom = tk.Radiobutton(out_frame, text="Özel Hedef Klasör:", variable=out_mode_var, value="custom",
+                                       bg=COLORS["bg_deep"], fg=COLORS["text_primary"], selectcolor=COLORS["bg_surface"],
+                                       activebackground=COLORS["bg_deep"], activeforeground="white", font=("Segoe UI", 9))
+        rb_out_custom.pack(side=tk.LEFT, padx=(0, 4))
+
+        custom_dir_entry = tk.Entry(out_frame, textvariable=custom_dir_var, bg=COLORS["bg_input"],
+                                    fg=COLORS["text_primary"], font=("Segoe UI", 9), relief="flat",
+                                    highlightthickness=1, highlightbackground=COLORS["border"], width=32)
+        custom_dir_entry.pack(side=tk.LEFT, padx=(0, 4), ipady=2)
+
+        def browse_custom_out():
+            out_mode_var.set("custom")
+            d = filedialog.askdirectory(title="Dönüştürülen MP4 Videolarının Kaydedileceği Klasörü Seçin")
+            if d:
+                custom_dir_var.set(d)
+
+        btn_browse_out = tk.Button(out_frame, text="📂 Gözat...", bg=COLORS["bg_surface"], fg=COLORS["text_primary"],
+                                   font=("Segoe UI", 8), relief="flat", cursor="hand2", padx=8, pady=2,
+                                   command=browse_custom_out)
+        btn_browse_out.pack(side=tk.LEFT)
+
         # 2. Üst Kontrol Çubuğu (Dosya/Klasör Ekle)
         ctrl_frame = tk.Frame(conv_win, bg=COLORS["bg_surface"], padx=20, pady=4)
         ctrl_frame.pack(fill=tk.X)
@@ -3118,6 +3201,18 @@ class NollySubApp:
             if is_converting[0]:
                 return
 
+            out_mode = out_mode_var.get()
+            custom_dir = custom_dir_var.get().strip()
+            if out_mode == "custom":
+                if not custom_dir:
+                    messagebox.showwarning("Uyarı", "Lütfen bir çıktı klasörü seçin veya 'Orijinal Klasör' seçeneğini belirleyin.")
+                    return
+                try:
+                    os.makedirs(custom_dir, exist_ok=True)
+                except Exception as e:
+                    messagebox.showerror("Hata", f"Hedef klasör oluşturulamadı: {e}")
+                    return
+
             is_converting[0] = True
             cancel_event.clear()
             btn_start.config(state=tk.DISABLED, bg=COLORS["bg_elevated"])
@@ -3132,14 +3227,18 @@ class NollySubApp:
             def run_thread():
                 successful_count = 0
                 failed_count = 0
+                converted_output_paths = []
 
                 for index, (iid, item_data) in enumerate(items_list):
                     if cancel_event.is_set():
                         break
 
                     mkv_p = item_data["mkv_path"]
-                    base_name = os.path.splitext(mkv_p)[0]
-                    out_mp4 = base_name + ".mp4"
+                    stem = os.path.splitext(os.path.basename(mkv_p))[0]
+                    if out_mode == "custom" and custom_dir:
+                        out_mp4 = os.path.join(custom_dir, stem + ".mp4")
+                    else:
+                        out_mp4 = os.path.splitext(mkv_p)[0] + ".mp4"
 
                     self.root.after(0, lambda _iid=iid, _idx=index+1: (
                         tree.set(_iid, "status", "⏳ Dönüştürülüyor..."),
@@ -3168,6 +3267,7 @@ class NollySubApp:
 
                     if ok:
                         successful_count += 1
+                        converted_output_paths.append(out_mp4)
                         self.root.after(0, lambda _iid=iid: tree.set(_iid, "status", "✅ Tamamlandı"))
                     else:
                         failed_count += 1
@@ -3177,14 +3277,25 @@ class NollySubApp:
                     self.root.after(0, lambda _idx=index+1: progress_bar.config(value=_idx))
 
                 is_converting[0] = False
-                self.root.after(0, lambda: (
-                    btn_start.config(state=tk.NORMAL, bg=COLORS["accent"]),
-                    btn_stop.config(state=tk.DISABLED, bg=COLORS["bg_elevated"]),
+
+                def finish_ui():
+                    btn_start.config(state=tk.NORMAL, bg=COLORS["accent"])
+                    btn_stop.config(state=tk.DISABLED, bg=COLORS["bg_elevated"])
                     status_lbl.config(
                         text=f"İşlem bitti. Tamamlanan: {successful_count}, Hatalı/İptal: {failed_count}" if not cancel_event.is_set() else "İşlem kullanıcı tarafından iptal edildi.",
                         fg=COLORS["success"] if successful_count > 0 and failed_count == 0 else COLORS["warning"]
                     )
-                ))
+                    if successful_count > 0 and not cancel_event.is_set():
+                        ans = messagebox.askyesno(
+                            "Dönüştürme Tamamlandı 🎉",
+                            f"Toplam {successful_count} video başarıyla MP4 formatına dönüştürüldü!\n\nÇıktı klasörü açılsın mı?"
+                        )
+                        if ans:
+                            target_out_dir = custom_dir if (out_mode == "custom" and custom_dir) else os.path.dirname(items_list[0][1]["mkv_path"])
+                            if os.path.exists(target_out_dir):
+                                os.startfile(target_out_dir)
+
+                self.root.after(0, finish_ui)
 
             threading.Thread(target=run_thread, daemon=True).start()
 

@@ -26,10 +26,10 @@
 - 🇹🇷 **Akıllı Türkçe Altyazı Algılama**:
   - Türkçe içerikli salımları otomatik tespit eder ve sonuç listesinin en üstünde yeşil renkle vurgular.
 
-- 🎬 **Gelişmiş MKV Araç Kutusu**:
-  - **MKV -> MP4 Video Dönüştürücü**: MKV formatındaki video dosyalarını saniyeler içinde kalite kaybı olmadan (Hızlı Remux) veya tam yeniden kodlama (H.264/AAC) ile `.mp4` formatına dönüştürür.
+- 🎬 **Gelişmiş MKV & MP4 Araç Kutusu**:
+  - **MKV -> MP4 Video Dönüştürücü**: MKV formatındaki video dosyalarını saniyeler içinde kalite kaybı olmadan (Hızlı Remux) veya tam yeniden kodlama (H.264/AAC) ile `.mp4` formatına dönüştürür. Dönüştürülen dosyaları orijinal klasöre veya **özel seçilen hedef klasöre** aktarma desteği sunar.
+  - **MKV / MP4 Dublaj & Ses İzi Değiştirici**: MKV ve MP4 videolarının varsayılan ses izini (Türkçe/Japonca/İngilizce vb.) toplu veya tekli olarak yeniden kodlamadan fiziki olarak değiştirir.
   - **MKV Altyazı Çıkarıcı**: `.mkv` dosyalarının içerisindeki gömülü altyazıları tek tıkla `.srt` / `.ass` dosyası olarak dışarı kaydeder.
-  - **MKV Dublaj & Ses İzi Değiştirici**: MKV videolarının varsayılan ses izini (Türkçe/Japonca/İngilizce) toplu veya tekli olarak değiştirir.
 
 
 - 🔄 **Toplu Altyazı Format Dönüştürücü**:
