@@ -727,7 +727,7 @@ def match_audio_track_lang(item, target_lang):
         return False
 
     t_clean = str(target_lang).strip().lower()
-    if not t_clean:
+    if not t_clean or t_clean in ("und", "unk", "unknown", "root", "none", "null"):
         return False
 
     lang = str(item.get("lang") or item.get("language") or "").lower()
@@ -1288,21 +1288,26 @@ class MkvTools:
         if not audio_tracks:
             return False
 
-        target_id = audio_track_id
+        target_id = None
+        # 1. Eğer audio_track_id doğrudan bu dosyada mevcut bir ses izi ID'sine eşitse:
+        for t in audio_tracks:
+            if t["id"] == audio_track_id:
+                target_id = t["id"]
+                break
 
-        # 1. Hedef dille eşleşen iz var mı?
-        if target_lang:
+        # 2. Eğer hedef ID uymadıysa (örn. toplu işlemde 2. dosyada ID'ler farklıysa), dil eşleştirmesi dene
+        if target_id is None and target_lang and str(target_lang).strip().lower() not in ("und", "unk", "unknown", "none", ""):
             for t in audio_tracks:
                 if match_audio_track_lang(t, target_lang):
                     target_id = t["id"]
                     break
 
-        # 2. Eğer target_id audio_tracks içinde bulunamazsa (örn. batch dosyalarda ID farkı varsa), relatif index kullanarak eşleştir
-        if not any(t["id"] == target_id for t in audio_tracks):
+        # 3. Eğer dil ile de bulunamadıysa relatif index (sıra) kullan
+        if target_id is None:
             if 0 <= audio_track_id < len(audio_tracks):
                 target_id = audio_tracks[audio_track_id]["id"]
             else:
-                target_id = audio_tracks[0]["id"]
+                target_id = audio_tracks[min(audio_track_id, len(audio_tracks) - 1) if audio_tracks else 0]["id"]
 
         # MP4 / M4V / MOV veya MKVToolNix olmayan sistemlerde FFmpeg Stream Copy ile iz sırasını değiştirme
         is_mp4 = str(mkv_path).lower().endswith((".mp4", ".m4v", ".mov"))
@@ -1332,6 +1337,12 @@ class MkvTools:
                     for idx in range(total_audio):
                         disp_val = "default" if idx == 0 else "0"
                         cmd.extend([f"-disposition:a:{idx}", disp_val])
+
+                    selected_track_info = next((t for t in audio_tracks if t["id"] == target_id), None)
+                    if selected_track_info:
+                        t_lang = selected_track_info.get("language") or target_lang
+                        if t_lang and str(t_lang).lower() not in ("und", "unk", ""):
+                            cmd.extend(["-metadata:s:a:0", f"language={t_lang}"])
 
                     if is_mp4:
                         cmd.extend(["-movflags", "+faststart"])
