@@ -1164,12 +1164,22 @@ class MkvTools:
         """Media dosyasındaki (MKV, MP4 vb.) tüm parçaları (Video, Ses, Altyazı) listeler.
         MKVToolNix (mkvmerge) veya FFmpeg (ffprobe) kullanarak parçaları döndürür.
         """
+        if not mkvmerge_bin or not os.path.exists(mkvmerge_bin):
+            cfg_mmerge = ConfigManager().find_mkvtoolnix()[0]
+            if cfg_mmerge and os.path.exists(cfg_mmerge):
+                mkvmerge_bin = cfg_mmerge
+
+        if not ffprobe_bin or not os.path.exists(ffprobe_bin):
+            cfg_probe = ConfigManager().find_ffprobe()
+            if cfg_probe and os.path.exists(cfg_probe):
+                ffprobe_bin = cfg_probe
+
         # 1. Deneme: mkvmerge (varsa)
         if mkvmerge_bin and (os.path.exists(mkvmerge_bin) or shutil.which(mkvmerge_bin)):
             try:
                 cmd = [mkvmerge_bin, "-J", media_path]
                 res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore")
-                if res.returncode == 0 and res.stdout.strip():
+                if res.stdout.strip() and res.stdout.strip().startswith("{"):
                     info = json.loads(res.stdout)
                     tracks = []
                     for t in info.get("tracks", []):
@@ -1193,14 +1203,11 @@ class MkvTools:
                 print(f"mkvmerge get_tracks hatası: {e}")
 
         # 2. Deneme: ffprobe (Özellikle MP4 ve mkvmerge olmayan sistemler için)
-        if not ffprobe_bin:
-            ffprobe_bin = shutil.which("ffprobe")
-
         if ffprobe_bin and (os.path.exists(ffprobe_bin) or shutil.which(ffprobe_bin)):
             try:
                 cmd = [ffprobe_bin, "-v", "error", "-show_streams", "-show_format", "-of", "json", media_path]
                 res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore")
-                if res.returncode == 0 and res.stdout.strip():
+                if res.stdout.strip() and res.stdout.strip().startswith("{"):
                     info = json.loads(res.stdout)
                     tracks = []
                     for stream in info.get("streams", []):
@@ -1309,105 +1316,135 @@ class MkvTools:
             else:
                 target_id = audio_tracks[min(audio_track_id, len(audio_tracks) - 1) if audio_tracks else 0]["id"]
 
-        # Varsayılan dil etiketi belirleme (Eğer hedef dil verilmediyse varsayılan "tur" / Türkçe ayarla)
         eff_lang = str(target_lang).strip().lower() if target_lang else "tur"
         if eff_lang in ("und", "unk", "unknown", "none", ""):
             eff_lang = "tur"
 
-        # MP4 / M4V / MOV veya MKVToolNix olmayan sistemlerde FFmpeg Stream Copy ile iz sırasını değiştirme
         is_mp4 = str(mkv_path).lower().endswith((".mp4", ".m4v", ".mov"))
-        if is_mp4 or (not mkvmerge_bin and not mkvpropedit_bin):
-            if ffmpeg_bin and (os.path.exists(ffmpeg_bin) or shutil.which(ffmpeg_bin)):
-                try:
-                    target_rel_idx = 0
-                    for idx, t in enumerate(audio_tracks):
-                        if t["id"] == target_id:
-                            target_rel_idx = idx
-                            break
+        creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
-                    total_audio = len(audio_tracks)
-                    ext = os.path.splitext(mkv_path)[1]
-                    temp_out = str(mkv_path) + f".tmp_nolly{ext}"
-
-                    cmd = [ffmpeg_bin, "-y", "-i", mkv_path, "-c", "copy", "-map", "0:v?"]
-                    # Selected audio stream as output 0:a:0
-                    cmd.extend(["-map", f"0:a:{target_rel_idx}"])
-                    # Remaining audio streams
-                    for idx in range(total_audio):
-                        if idx != target_rel_idx:
-                            cmd.extend(["-map", f"0:a:{idx}"])
-                    cmd.extend(["-map", "0:s?", "-map", "0:d?"])
-
-                    # Update dispositions
-                    for idx in range(total_audio):
-                        disp_val = "default" if idx == 0 else "0"
-                        cmd.extend([f"-disposition:a:{idx}", disp_val])
-
-                    # 1. Ses izinin dil etiketini Türkçe/Hedef Dil olarak kesin güncelle
-                    cmd.extend(["-metadata:s:a:0", f"language={eff_lang}"])
-
-                    # Diğer ses izlerinde 'tur' etiketi varsa onları temizle (Windows Media Player çakışmasını önlemek için)
-                    for idx in range(1, total_audio):
-                        cmd.extend(["-metadata:s:a:{idx}".format(idx=idx), "language=und"])
-
-                    if is_mp4:
-                        cmd.extend(["-movflags", "+faststart"])
-
-                    cmd.append(temp_out)
-                    creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-                    res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore", creationflags=creation_flags)
-                    if res.returncode == 0 and os.path.exists(temp_out) and os.path.getsize(temp_out) > 0:
-                        os.replace(temp_out, mkv_path)
-                        return True
-                    else:
-                        if os.path.exists(temp_out):
-                            try:
-                                os.remove(temp_out)
-                            except Exception:
-                                pass
-                except Exception as e:
-                    print(f"FFmpeg ses izi reorder hatası: {e}")
-
-        # MKV Dosyaları için MKVToolNix Kullanımı (mkvmerge veya mkvpropedit varsa)
+        # YÖNTEM 1: MKVToolNix (mkvmerge) Motoru ile İz Sıralama ve Varsayılan Bayrak (MKV & MP4 Desteği)
         if mkvmerge_bin and (os.path.exists(mkvmerge_bin) or shutil.which(mkvmerge_bin)):
             try:
-                video_tracks = [t["id"] for t in tracks if t["type"] == "video"]
-                other_audio = [t["id"] for t in audio_tracks if t["id"] != target_id]
-                other_tracks = [t["id"] for t in tracks if t["type"] not in ("video", "audio")]
+                mkv_info_cmd = [mkvmerge_bin, "-J", mkv_path]
+                res_mkv_info = subprocess.run(mkv_info_cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore", creationflags=creation_flags)
+                if res_mkv_info.returncode == 0 and res_mkv_info.stdout.strip():
+                    info = json.loads(res_mkv_info.stdout)
+                    all_mkv_tracks = info.get("tracks", [])
+                    mkv_audio_tracks = [t for t in all_mkv_tracks if t["type"] == "audio"]
 
-                ordered_ids = video_tracks + [target_id] + other_audio + other_tracks
-                track_order_str = ",".join(f"0:{tid}" for tid in ordered_ids)
+                    mkv_target_id = None
+                    if target_id is not None:
+                        for t in mkv_audio_tracks:
+                            if t["id"] == target_id:
+                                mkv_target_id = t["id"]
+                                break
 
-                temp_path = str(mkv_path) + ".tmp_nolly.mkv"
-                cmd = [mkvmerge_bin, "-o", temp_path]
+                    if mkv_target_id is None and mkv_audio_tracks:
+                        target_rel_idx = 0
+                        for idx, t in enumerate(audio_tracks):
+                            if t["id"] == target_id:
+                                target_rel_idx = idx
+                                break
+                        if target_rel_idx < len(mkv_audio_tracks):
+                            mkv_target_id = mkv_audio_tracks[target_rel_idx]["id"]
+                        else:
+                            mkv_target_id = mkv_audio_tracks[0]["id"]
 
-                for t in audio_tracks:
-                    is_def = "yes" if t["id"] == target_id else "no"
-                    cmd.extend(["--default-track-flag", f"{t['id']}:{is_def}"])
+                    if mkv_target_id is not None:
+                        video_tids = [t["id"] for t in all_mkv_tracks if t["type"] == "video"]
+                        other_audio_tids = [t["id"] for t in mkv_audio_tracks if t["id"] != mkv_target_id]
+                        other_tids = [t["id"] for t in all_mkv_tracks if t["type"] not in ("video", "audio")]
 
-                cmd.extend(["--track-order", track_order_str, mkv_path])
+                        ordered_ids = video_tids + [mkv_target_id] + other_audio_tids + other_tids
+                        track_order_str = ",".join(f"0:{tid}" for tid in ordered_ids)
 
-                res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore")
-                if res.returncode in (0, 1) and os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:
-                    os.replace(temp_path, mkv_path)
+                        temp_mkv = str(mkv_path) + ".tmp_mkvmerge.mkv"
+                        cmd = [mkvmerge_bin, "-o", temp_mkv]
+
+                        for t in mkv_audio_tracks:
+                            is_def = "yes" if t["id"] == mkv_target_id else "no"
+                            cmd.extend(["--default-track-flag", f"{t['id']}:{is_def}"])
+                            if t["id"] == mkv_target_id:
+                                cmd.extend(["--language", f"{t['id']}:{eff_lang}"])
+
+                        cmd.extend(["--track-order", track_order_str, mkv_path])
+                        res_mkv = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore", creationflags=creation_flags)
+
+                        if res_mkv.returncode in (0, 1) and os.path.exists(temp_mkv) and os.path.getsize(temp_mkv) > 0:
+                            if not is_mp4:
+                                os.replace(temp_mkv, mkv_path)
+                                return True
+                            else:
+                                # MP4 dosyaları için mkvmerge çıktısını FFmpeg ile MP4 konteynırına kopyala
+                                temp_mp4 = str(mkv_path) + ".tmp_nolly.mp4"
+                                cmd_ff = [
+                                    ffmpeg_bin, "-y", "-i", temp_mkv, "-c", "copy",
+                                    "-map", "0:v?", "-map", "0:a?", "-map", "0:s?", "-map", "0:d?",
+                                    "-disposition:a:0", "default",
+                                    "-metadata:s:a:0", f"language={eff_lang}",
+                                    "-movflags", "+faststart",
+                                    temp_mp4
+                                ]
+                                for idx in range(1, len(mkv_audio_tracks)):
+                                    cmd_ff.extend([f"-disposition:a:{idx}", "0", f"-metadata:s:a:{idx}", "language=und"])
+
+                                res_ff = subprocess.run(cmd_ff, capture_output=True, text=True, encoding="utf-8", errors="ignore", creationflags=creation_flags)
+                                try: os.remove(temp_mkv)
+                                except Exception: pass
+
+                                if res_ff.returncode == 0 and os.path.exists(temp_mp4) and os.path.getsize(temp_mp4) > 0:
+                                    os.replace(temp_mp4, mkv_path)
+                                    return True
+                                else:
+                                    if os.path.exists(temp_mp4):
+                                        try: os.remove(temp_mp4)
+                                        except Exception: pass
+            except Exception as e:
+                print(f"mkvmerge MP4/MKV remux hatası: {e}")
+
+        # YÖNTEM 2: FFmpeg Doğrudan Stream Copy (Fallback)
+        if ffmpeg_bin and (os.path.exists(ffmpeg_bin) or shutil.which(ffmpeg_bin)):
+            try:
+                target_rel_idx = 0
+                for idx, t in enumerate(audio_tracks):
+                    if t["id"] == target_id:
+                        target_rel_idx = idx
+                        break
+
+                total_audio = len(audio_tracks)
+                ext = os.path.splitext(mkv_path)[1]
+                temp_out = str(mkv_path) + f".tmp_nolly{ext}"
+
+                cmd = [ffmpeg_bin, "-y", "-i", mkv_path, "-c", "copy", "-map", "0:v?"]
+                cmd.extend(["-map", f"0:a:{target_rel_idx}"])
+                for idx in range(total_audio):
+                    if idx != target_rel_idx:
+                        cmd.extend(["-map", f"0:a:{idx}"])
+                cmd.extend(["-map", "0:s?", "-map", "0:d?"])
+
+                for idx in range(total_audio):
+                    disp_val = "default" if idx == 0 else "0"
+                    cmd.extend([f"-disposition:a:{idx}", disp_val])
+
+                cmd.extend(["-metadata:s:a:0", f"language={eff_lang}"])
+                for idx in range(1, total_audio):
+                    cmd.extend([f"-metadata:s:a:{idx}", "language=und"])
+
+                if is_mp4:
+                    cmd.extend(["-movflags", "+faststart"])
+
+                cmd.append(temp_out)
+                res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore", creationflags=creation_flags)
+                if res.returncode == 0 and os.path.exists(temp_out) and os.path.getsize(temp_out) > 0:
+                    os.replace(temp_out, mkv_path)
                     return True
                 else:
-                    if os.path.exists(temp_path):
-                        try:
-                            os.remove(temp_path)
-                        except Exception:
-                            pass
+                    if os.path.exists(temp_out):
+                        try: os.remove(temp_out)
+                        except Exception: pass
             except Exception as e:
-                print(f"mkvmerge remux hatası: {e}")
-
-        if mkvpropedit_bin and (os.path.exists(mkvpropedit_bin) or shutil.which(mkvpropedit_bin)):
-            cmd = [mkvpropedit_bin, mkv_path]
-            for idx, t in enumerate(audio_tracks):
-                is_def = "1" if t["id"] == target_id else "0"
-                cmd.extend(["--edit", f"track:a{idx + 1}", "--set", f"flag-default={is_def}"])
-
-            res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore")
-            return res.returncode == 0
+                print(f"FFmpeg fallback reorder hatası: {e}")
 
         return False
 
