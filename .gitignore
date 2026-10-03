@@ -7,3 +7,5 @@ __pycache__/
 *.log
 .vscode/
 .idea/
+*.mp4
+*.mkv

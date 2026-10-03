@@ -2654,13 +2654,15 @@ class NollySubApp:
 
         dub_win = tk.Toplevel(self.root)
         dub_win.title("🎙️ NollySub — MKV / MP4 Dublaj & Ses İzi Değiştirici")
-        dub_win.geometry("780x580")
+        dub_win.geometry("820x620")
+        dub_win.minsize(740, 480)
+        dub_win.resizable(True, True)
         dub_win.configure(bg=COLORS["bg_surface"])
         dub_win.transient(self.root)
 
         # Üst Bilgi
-        header_frame = tk.Frame(dub_win, bg=COLORS["bg_surface"], padx=20, pady=15)
-        header_frame.pack(fill=tk.X)
+        header_frame = tk.Frame(dub_win, bg=COLORS["bg_surface"], padx=20, pady=12)
+        header_frame.pack(side=tk.TOP, fill=tk.X)
 
         tk.Label(header_frame, text="🎙️ MKV / MP4 Varsayılan Ses İzi (Dublaj) Ayarlayıcı", bg=COLORS["bg_surface"],
                  fg=COLORS["text_primary"], font=("Segoe UI", 13, "bold")).pack(anchor=tk.W)
@@ -2668,8 +2670,8 @@ class NollySubApp:
                  bg=COLORS["bg_surface"], fg=COLORS["text_muted"], font=("Segoe UI", 9)).pack(anchor=tk.W, pady=(2, 0))
 
         # Dosya Seçim Alanı
-        file_card = tk.Frame(dub_win, bg=COLORS["bg_elevated"], padx=15, pady=12, highlightthickness=1, highlightbackground=COLORS["border"])
-        file_card.pack(fill=tk.X, padx=20, pady=5)
+        file_card = tk.Frame(dub_win, bg=COLORS["bg_elevated"], padx=15, pady=10, highlightthickness=1, highlightbackground=COLORS["border"])
+        file_card.pack(side=tk.TOP, fill=tk.X, padx=20, pady=(0, 6))
 
         selected_files = []
         file_label_var = tk.StringVar(value="Henüz dosya seçilmedi")
@@ -2677,22 +2679,77 @@ class NollySubApp:
         tk.Label(file_card, textvariable=file_label_var, bg=COLORS["bg_elevated"],
                  fg=COLORS["text_primary"], font=("Segoe UI", 9, "bold"), anchor=tk.W).pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        # Ses İzleri Listesi
-        tracks_frame = tk.Frame(dub_win, bg=COLORS["bg_surface"], padx=20, pady=10)
-        tracks_frame.pack(fill=tk.BOTH, expand=True)
+        # Alt İşlem Butonları (Her zaman görünür olması için önce en alta sabitlenir)
+        bottom_frame = tk.Frame(dub_win, bg=COLORS["bg_surface"], padx=20, pady=12)
+        bottom_frame.pack(side=tk.BOTTOM, fill=tk.X)
+
+        # Seçenekler Alanı (Alt butonların hemen üzerinde sabit)
+        opts_card = tk.Frame(dub_win, bg=COLORS["bg_surface"], padx=20, pady=4)
+        opts_card.pack(side=tk.BOTTOM, fill=tk.X)
+
+        save_as_new_var = tk.BooleanVar(value=True)
+        keep_only_selected_var = tk.BooleanVar(value=False)
+
+        cb1 = tk.Checkbutton(opts_card, text="🛡️ Medya oynatıcı önbellek çakışmasını önle (_TurkceDublaj sonekiyle yeni dosya kaydet)",
+                             variable=save_as_new_var, bg=COLORS["bg_surface"], fg=COLORS["text_primary"],
+                             selectcolor=COLORS["bg_deep"], activebackground=COLORS["bg_surface"], font=("Segoe UI", 9, "bold"))
+        cb1.pack(anchor=tk.W)
+
+        cb2 = tk.Checkbutton(opts_card, text="⚡ %100 Kesin Çözüm: Seçilen Dublaj Dışındaki Diğer Ses İzlerini Sil (Yalnızca seçilen dublaj kalsın)",
+                             variable=keep_only_selected_var, bg=COLORS["bg_surface"], fg=COLORS["warning"],
+                             selectcolor=COLORS["bg_deep"], activebackground=COLORS["bg_surface"], font=("Segoe UI", 9, "bold"))
+        cb2.pack(anchor=tk.W, pady=(2, 0))
+
+        # Ses İzleri Listesi (Penceredeki kalan tüm orta alanı doldurur ve kaydırılabilirdir)
+        tracks_frame = tk.Frame(dub_win, bg=COLORS["bg_surface"], padx=20, pady=4)
+        tracks_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, pady=(2, 6))
 
         tk.Label(tracks_frame, text="Mevcut Ses İzleri (Dublajlar) — Lütfen varsayılan olmasını istediğiniz dublaja tıklayın:",
-                 bg=COLORS["bg_surface"], fg=COLORS["text_secondary"], font=("Segoe UI", 10, "bold")).pack(anchor=tk.W, pady=(0, 5))
+                 bg=COLORS["bg_surface"], fg=COLORS["text_secondary"], font=("Segoe UI", 10, "bold")).pack(anchor=tk.W, pady=(0, 6))
 
         list_container = tk.Frame(tracks_frame, bg=COLORS["bg_deep"], highlightthickness=1, highlightbackground=COLORS["border"])
         list_container.pack(fill=tk.BOTH, expand=True)
 
+        # Kaydırılabilir Canvas ve Scrollbar
+        canvas = tk.Canvas(list_container, bg=COLORS["bg_deep"], highlightthickness=0, bd=0)
+        scrollbar = ttk.Scrollbar(list_container, orient=tk.VERTICAL, command=canvas.yview, style="Dark.Vertical.TScrollbar")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        inner_tracks_frame = tk.Frame(canvas, bg=COLORS["bg_deep"])
+        canvas_window = canvas.create_window((0, 0), window=inner_tracks_frame, anchor="nw")
+
+        def _on_frame_configure(event=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def _on_canvas_configure(event):
+            canvas.itemconfig(canvas_window, width=event.width)
+
+        inner_tracks_frame.bind("<Configure>", _on_frame_configure)
+        canvas.bind("<Configure>", _on_canvas_configure)
+
+        def _on_mousewheel(event):
+            try:
+                canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            except Exception:
+                pass
+
+        def _bind_mousewheel(widget):
+            try:
+                widget.bind("<MouseWheel>", _on_mousewheel)
+                for child in widget.winfo_children():
+                    _bind_mousewheel(child)
+            except Exception:
+                pass
+
+        canvas.bind("<MouseWheel>", _on_mousewheel)
+        inner_tracks_frame.bind("<MouseWheel>", _on_mousewheel)
+
         selected_audio_id = tk.IntVar(value=-1)
         audio_tracks = []
         row_widgets = []
-
-        inner_tracks_frame = tk.Frame(list_container, bg=COLORS["bg_deep"])
-        inner_tracks_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
         def get_lang_display(code):
             code = (code or "und").lower()
@@ -2723,7 +2780,7 @@ class NollySubApp:
 
                 row = tk.Frame(inner_tracks_frame, bg=bg_color, padx=12, pady=10,
                                highlightthickness=border_width, highlightbackground=border_color, cursor="hand2")
-                row.pack(fill=tk.X, pady=4)
+                row.pack(fill=tk.X, pady=4, padx=6)
                 row_widgets.append(row)
 
                 def make_select_cmd(target_tid=tid):
@@ -2734,42 +2791,53 @@ class NollySubApp:
 
                 select_handler = make_select_cmd(tid)
 
-                # Radiobutton
+                # Sağ Taraf Yeşil Seçim Butonu / İndikatörü (Sağa sabitlenir)
+                if is_active:
+                    btn_action = tk.Button(row, text="✔  SEÇİLDİ (VARSAYILAN SES YAPILACAK)", bg="#10b981", fg="white",
+                                           font=("Segoe UI", 9, "bold"), relief="flat", padx=12, pady=4, cursor="hand2", command=select_handler)
+                else:
+                    btn_action = tk.Button(row, text="⚪  Bunu Varsayılan Seç", bg=COLORS["bg_elevated"], fg=COLORS["text_secondary"],
+                                           font=("Segoe UI", 9), relief="flat", padx=12, pady=4, cursor="hand2", command=select_handler)
+                btn_action.pack(side=tk.RIGHT, padx=(8, 0))
+
+                # Sol Taraf Radiobutton
                 rb = tk.Radiobutton(row, text="", variable=selected_audio_id, value=tid, command=select_handler,
                                     bg=bg_color, selectcolor="#059669" if is_active else COLORS["bg_deep"], activebackground=bg_color)
                 rb.pack(side=tk.LEFT)
 
-                # Metin Bilgisi
+                # Metin Bilgisi (Ortadaki tüm alanı kaplar)
                 lbl_txt = f"Ses İzi #{idx + 1} (ID: {tid})  |  Dil: {lang_str}  |  Format: {codec_str}  |  İsim: {name_str}"
                 if is_def:
                     lbl_txt += "  🟢 [Videodaki Mevcut Varsayılan]"
 
                 lbl_fg = "#ffffff" if is_active else (COLORS["success"] if is_def else COLORS["text_primary"])
-                lbl = tk.Label(row, text=lbl_txt, bg=bg_color, fg=lbl_fg, font=("Segoe UI", 10, "bold" if (is_active or is_def) else "normal"), cursor="hand2")
-                lbl.pack(side=tk.LEFT, padx=8)
-
-                # Sağ Taraf Yeşil Seçim Butonu / İndikatörü
-                if is_active:
-                    btn_active = tk.Button(row, text="✔  SEÇİLDİ (VARSAYILAN SES YAPILACAK)", bg="#10b981", fg="white",
-                                           font=("Segoe UI", 9, "bold"), relief="flat", padx=10, pady=3, cursor="hand2", command=select_handler)
-                    btn_active.pack(side=tk.RIGHT)
-                else:
-                    btn_inactive = tk.Button(row, text="⚪  Bunu Varsayılan Seç", bg=COLORS["bg_elevated"], fg=COLORS["text_secondary"],
-                                             font=("Segoe UI", 9), relief="flat", padx=10, pady=3, cursor="hand2", command=select_handler)
-                    btn_inactive.pack(side=tk.RIGHT)
+                lbl = tk.Label(row, text=lbl_txt, bg=bg_color, fg=lbl_fg,
+                               font=("Segoe UI", 10, "bold" if (is_active or is_def) else "normal"),
+                               anchor=tk.W, cursor="hand2")
+                lbl.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=8)
 
                 # Satırın her yerine tıklayınca seçim yapılması
                 row.bind("<Button-1>", select_handler)
                 lbl.bind("<Button-1>", select_handler)
+
+                # Fare tekerleğiyle kaydırma desteğini bağla
+                _bind_mousewheel(row)
+
+            inner_tracks_frame.update_idletasks()
+            canvas.configure(scrollregion=canvas.bbox("all"))
 
         def load_mkv_tracks():
             nonlocal audio_tracks
             for widget in inner_tracks_frame.winfo_children():
                 widget.destroy()
 
+            canvas.yview_moveto(0)
+
             if not selected_files:
                 tk.Label(inner_tracks_frame, text="Lütfen yukarıdaki butondan bir MKV veya MP4 dosyası seçin.",
                          bg=COLORS["bg_deep"], fg=COLORS["text_muted"], font=("Segoe UI", 10)).pack(pady=40)
+                inner_tracks_frame.update_idletasks()
+                canvas.configure(scrollregion=canvas.bbox("all"))
                 return
 
             try:
@@ -2779,6 +2847,8 @@ class NollySubApp:
                 if not audio_tracks:
                     tk.Label(inner_tracks_frame, text="Seçilen dosyada herhangi bir ses izi bulunamadı.",
                              bg=COLORS["bg_deep"], fg=COLORS["warning"], font=("Segoe UI", 10)).pack(pady=40)
+                    inner_tracks_frame.update_idletasks()
+                    canvas.configure(scrollregion=canvas.bbox("all"))
                     return
 
                 def_id = audio_tracks[0]["id"]
@@ -2792,6 +2862,8 @@ class NollySubApp:
             except Exception as e:
                 tk.Label(inner_tracks_frame, text=f"Video dosyası okunamadı: {e}",
                          bg=COLORS["bg_deep"], fg=COLORS["accent"], font=("Segoe UI", 9)).pack(pady=20)
+                inner_tracks_frame.update_idletasks()
+                canvas.configure(scrollregion=canvas.bbox("all"))
 
         def browse_mkv():
             nonlocal selected_files
@@ -2817,27 +2889,6 @@ class NollySubApp:
                   command=browse_mkv).pack(side=tk.RIGHT)
 
         load_mkv_tracks()
-
-        # Seçenekler Alanı
-        opts_card = tk.Frame(dub_win, bg=COLORS["bg_surface"], padx=20, pady=5)
-        opts_card.pack(fill=tk.X)
-
-        save_as_new_var = tk.BooleanVar(value=True)
-        keep_only_selected_var = tk.BooleanVar(value=False)
-
-        cb1 = tk.Checkbutton(opts_card, text="🛡️ Medya oynatıcı önbellek çakışmasını önle (_TurkceDublaj sonekiyle yeni dosya kaydet)",
-                             variable=save_as_new_var, bg=COLORS["bg_surface"], fg=COLORS["text_primary"],
-                             selectcolor=COLORS["bg_deep"], activebackground=COLORS["bg_surface"], font=("Segoe UI", 9, "bold"))
-        cb1.pack(anchor=tk.W)
-
-        cb2 = tk.Checkbutton(opts_card, text="⚡ %100 Kesin Çözüm: Seçilen Dublaj Dışındaki Diğer Ses İzlerini Sil (Yalnızca seçilen dublaj kalsın)",
-                             variable=keep_only_selected_var, bg=COLORS["bg_surface"], fg=COLORS["warning"],
-                             selectcolor=COLORS["bg_deep"], activebackground=COLORS["bg_surface"], font=("Segoe UI", 9, "bold"))
-        cb2.pack(anchor=tk.W, pady=(2, 0))
-
-        # Alt İşlem Butonları
-        bottom_frame = tk.Frame(dub_win, bg=COLORS["bg_surface"], padx=20, pady=15)
-        bottom_frame.pack(fill=tk.X, side=tk.BOTTOM)
 
         def apply_default_audio():
             if not selected_files:
@@ -2884,12 +2935,16 @@ class NollySubApp:
             else:
                 messagebox.showerror("Hata", "Varsayılan ses izi güncellenirken bir hata oluştu.")
 
+        status_lbl = tk.Label(bottom_frame, text="💡 İstediğiniz dublajı seçip 'Kaydet' butonuna basabilirsiniz.",
+                              bg=COLORS["bg_surface"], fg=COLORS["text_muted"], font=("Segoe UI", 9))
+        status_lbl.pack(side=tk.LEFT)
+
         tk.Button(bottom_frame, text="💾  Seçilen Dublajı Varsayılan Olarak Kaydet", bg=COLORS["success"], fg="white",
-                  font=("Segoe UI", 10, "bold"), relief="flat", cursor="hand2", padx=18, pady=6,
+                  font=("Segoe UI", 10, "bold"), relief="flat", cursor="hand2", padx=20, pady=7,
                   command=apply_default_audio).pack(side=tk.RIGHT)
 
         tk.Button(bottom_frame, text="Kapat", bg=COLORS["bg_elevated"], fg=COLORS["text_secondary"],
-                  font=("Segoe UI", 10), relief="flat", cursor="hand2", padx=14, pady=6,
+                  font=("Segoe UI", 10), relief="flat", cursor="hand2", padx=14, pady=7,
                   command=dub_win.destroy).pack(side=tk.RIGHT, padx=8)
 
 
