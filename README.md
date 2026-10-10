@@ -17,8 +17,9 @@
 ## ✨ Özellikler
 
 - 🌸 **Entegre Anime Veritabanları**:
+  - 🐱 **nekoBT** (Anime Tracker & Fansub Topluluğu — Torznab RSS & API, doğrudan .torrent & magnet indirme)
   - ⚡ **AnimeTosho** (JSON API entegrasyonu — Torrent & Altyazılar)
-  - 🍙 **Nyaa.si** (RSS Canlı Arama)
+  - 🍙 **Nyaa.si** (Gelişmiş Web API & Parser — kernelginar/nyaa-api)
   - 🍿 **SubsPlease** (Multi-Sub Release Akışı)
   - 🌐 **OpenSubtitles.com** (REST API v1)
   - 📦 **SubDL.com** (Altyazı Arşivi)
@@ -67,11 +68,11 @@ python netrip.py
 
 ## ⚙ Kaynaklar & API Yapılandırması
 
-**NollySub**, varsayılan olarak **AnimeTosho**, **Nyaa.si** ve **SubsPlease** veritabanlarını hiçbir API anahtarı gerektirmeden doğrudan kullanır.
+**NollySub**, varsayılan olarak **nekoBT**, **AnimeTosho**, **Nyaa.si** ve **SubsPlease** veritabanlarını hiçbir API anahtarı gerektirmeden doğrudan kullanır.
 
-İsteğe bağlı olarak **OpenSubtitles** ve **SubDL** servislerine erişmek için:
+İsteğe bağlı olarak **OpenSubtitles**, **SubDL** ve kişiselleştirilmiş **nekoBT** hesap servislerine erişmek için:
 1. Uygulamadaki `⚙️ Ayarlar` butonuna tıklayın.
-2. `🔑 Key Al (Tek Tıkla)` butonlarına basarak tarayıcıda açılan sayfadan ücretsiz API anahtarınızı saniyeler içinde kopyalayıp ilgili kutucuğa yapıştırın ve kaydedin.
+2. `🔑 Key Al (Tek Tıkla)` veya `ℹ️ Info / Wiki Aç` butonlarına basarak tarayıcıda açılan sayfadan API anahtarınızı ilgili kutucuğa yapıştırın ve kaydedin.
 
 ---
 
@@ -83,6 +84,8 @@ NollySub/
 │   ├── logo.png          # Yüksek çözünürlüklü proje logosu
 │   ├── logo_avatar.png   # Yuvarlatılmış UI logosu
 │   └── icon.ico          # Windows ikon dosyası
+├── nekobt_api.py         # nekoBT Torznab & Torrent istemcisi
+├── nyaa_api.py           # Nyaa.si bağımsız API ayrıştırıcısı
 ├── nollysub.py           # Ana uygulama giriş noktası
 ├── netrip.py             # Geriye dönük uyumluluk başlatıcısı
 ├── requirements.txt      # Gerekli Python kütüphaneleri

@@ -10,9 +10,10 @@ Anime için Türkçe altyazıları (NollySub) arayıp .srt / .ass / torrent olar
 indiren masaüstü program.
 
 Kaynaklar:
+  - nekoBT Anime & Fansub Tracker (Torznab RSS & API)
   - AnimeTosho JSON API
-  - Nyaa.si RSS API
-  - SubsPlease RSS API
+  - Nyaa.si Gelişmiş API & Parser (kernelginar/nyaa-api)
+  - SubsPlease API
   - OpenSubtitles.com REST API
   - SubDL.com API
 """
@@ -45,6 +46,22 @@ except ImportError:
     print("'requests' kütüphanesi bulunamadı. Kuruluyor...")
     subprocess.run([sys.executable, "-m", "pip", "install", "requests"])
     import requests
+
+try:
+    import nyaa_api
+except ImportError:
+    try:
+        from . import nyaa_api
+    except Exception:
+        nyaa_api = None
+
+try:
+    import nekobt_api
+except ImportError:
+    try:
+        from . import nekobt_api
+    except Exception:
+        nekobt_api = None
 
 
 # ══════════════════════════════════════════════════════
@@ -150,6 +167,13 @@ class ConfigManager:
 
     def set_subdl_key(self, key):
         self.config["API"]["subdl_key"] = key
+        self.save()
+
+    def get_nekobt_key(self):
+        return self.config["API"].get("nekobt_key", "").strip()
+
+    def set_nekobt_key(self, key):
+        self.config["API"]["nekobt_key"] = key
         self.save()
 
     def get_download_dir(self):
@@ -462,65 +486,135 @@ class SubDLEngine:
 
 
 class NyaaEngine:
-    """Nyaa.si RSS ile anime torrent & altyazılı salımları arar."""
+    """Nyaa.si Gelişmiş API (kernelginar/nyaa-api) ile anime torrent & altyazılı salımları arar."""
 
     NAME = "Nyaa.si"
 
     def search(self, query, language=""):
         results = []
         seen_links = set()
-        
+
         queries_to_try = [query]
-        if "turkish" not in query.lower() and "türkçe" not in query.lower() and "tr" not in query.lower().split():
+        q_lower = query.lower()
+        if "turkish" not in q_lower and "türkçe" not in q_lower and "tr" not in q_lower.split():
             queries_to_try.append(f"{query} Turkish")
             queries_to_try.append(f"{query} TR")
 
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-        ns = {"nyaa": "https://nyaa.si/xmlns/nyaa"}
-
         for q in queries_to_try:
             try:
-                url = f"https://nyaa.si/?page=rss&q={requests.utils.quote(q)}"
-                resp = requests.get(url, headers=headers, timeout=10)
-                if resp.status_code == 200:
-                    try:
-                        root = ET.fromstring(resp.content)
-                    except ET.ParseError:
+                if nyaa_api:
+                    api_res = nyaa_api.search_nyaa(
+                        query=q,
+                        category=nyaa_api.CATEGORIES.ANIME.ALL,
+                        filter=nyaa_api.FILTER_TYPES.NO_FILTER,
+                        sort_by=nyaa_api.SORT_FIELDS.SEEDERS,
+                        sort_order=nyaa_api.SORT_ORDERS.DESCENDING,
+                        timeout=12,
+                    )
+                    items = api_res.get("results", [])
+                else:
+                    items = []
+
+                for item in items:
+                    title = item.get("title", "")
+                    torrent_url = item.get("torrent_url")
+                    magnet_link = item.get("magnet_link")
+                    view_url = item.get("view_url")
+                    link = torrent_url or magnet_link or view_url
+
+                    if not link or link in seen_links:
                         continue
+                    seen_links.add(link)
 
-                    for item in root.findall("./channel/item")[:20]:
-                        title = item.find("title").text if item.find("title") is not None else ""
-                        link = item.find("link").text if item.find("link") is not None else ""
+                    size = item.get("file_size", "?")
+                    seeders = str(item.get("seeders", 0))
+                    leechers = str(item.get("leechers", 0))
+                    is_trusted = item.get("is_trusted", False)
+                    is_batch = item.get("is_batch", False)
 
-                        if link in seen_links:
-                            continue
-                        seen_links.add(link)
+                    title_lower = title.lower()
+                    cat_code = item.get("category", {}).get("code", "")
+                    if any(k in title_lower for k in ["tr", "turkish", "türkçe", "turkce", "tac", "oishi", "ani-tr"]):
+                        lang_str = "🇹🇷 Türkçe Subbed"
+                    elif cat_code == "1_2":
+                        lang_str = "🌐 Multi / ENG"
+                    elif cat_code == "1_3":
+                        lang_str = "🌐 Non-English"
+                    elif cat_code == "1_4":
+                        lang_str = "🇯🇵 Raw / Japanese"
+                    else:
+                        lang_str = "🌐 Multi / ENG"
 
-                        size = item.find("nyaa:size", ns).text if item.find("nyaa:size", ns) is not None else "?"
-                        seeders = item.find("nyaa:seeders", ns).text if item.find("nyaa:seeders", ns) is not None else "?"
+                    trusted_badge = " [Güvenilir]" if is_trusted else ""
+                    batch_badge = " [Batch]" if is_batch else ""
+                    release_info = f"{size} | Seed: {seeders} | Leech: {leechers}{trusted_badge}{batch_badge}"
+                    uploader_name = "Nyaa (Güvenilir)" if is_trusted else "Nyaa"
 
-                        title_lower = title.lower()
-                        if any(k in title_lower for k in ["tr", "turkish", "türkçe", "turkce", "tac", "oishi"]):
-                            lang_str = "🇹🇷 Türkçe Subbed"
-                        else:
-                            lang_str = "🌐 Multi / ENG"
+                    safe_title = "".join(c for c in title if c not in r'\/:*?"<>|').strip() or "nyaa_release"
+                    file_name = f"{safe_title}.torrent" if torrent_url else f"{safe_title}.magnet"
 
-                        results.append({
-                            "source": self.NAME,
-                            "title": title,
-                            "year": "-",
-                            "season": "-",
-                            "episode": "-",
-                            "language": lang_str,
-                            "release": f"{size} | Seeders: {seeders}",
-                            "uploader": "Nyaa",
-                            "download_count": seeders,
-                            "file_id": link,
-                            "file_name": title + (".torrent" if not link.startswith("magnet:") else ".magnet"),
-                            "_engine": self,
-                        })
+                    results.append({
+                        "source": self.NAME,
+                        "title": title,
+                        "year": "-",
+                        "season": "-",
+                        "episode": "-",
+                        "language": lang_str,
+                        "release": release_info,
+                        "uploader": uploader_name,
+                        "download_count": seeders,
+                        "file_id": link,
+                        "file_name": file_name,
+                        "_engine": self,
+                        "torrent_url": torrent_url,
+                        "magnet_link": magnet_link,
+                        "info_hash": item.get("info_hash"),
+                        "file_size": size,
+                        "seeders": item.get("seeders", 0),
+                        "leechers": item.get("leechers", 0),
+                        "downloads": item.get("downloads", 0),
+                        "is_trusted": is_trusted,
+                        "is_batch": is_batch,
+                        "category": item.get("category", {}),
+                    })
             except Exception as e:
-                print(f"Nyaa.si Hatası ({q}): {e}")
+                # Fallback: Eski RSS yöntemi
+                try:
+                    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+                    ns = {"nyaa": "https://nyaa.si/xmlns/nyaa"}
+                    url = f"https://nyaa.si/?page=rss&q={requests.utils.quote(q)}"
+                    resp = requests.get(url, headers=headers, timeout=10)
+                    if resp.status_code == 200:
+                        root = ET.fromstring(resp.content)
+                        for item in root.findall("./channel/item")[:20]:
+                            title = item.find("title").text if item.find("title") is not None else ""
+                            link = item.find("link").text if item.find("link") is not None else ""
+                            if link in seen_links:
+                                continue
+                            seen_links.add(link)
+                            size = item.find("nyaa:size", ns).text if item.find("nyaa:size", ns) is not None else "?"
+                            seeders = item.find("nyaa:seeders", ns).text if item.find("nyaa:seeders", ns) is not None else "?"
+                            title_lower = title.lower()
+                            if any(k in title_lower for k in ["tr", "turkish", "türkçe", "turkce", "tac", "oishi"]):
+                                lang_str = "🇹🇷 Türkçe Subbed"
+                            else:
+                                lang_str = "🌐 Multi / ENG"
+                            results.append({
+                                "source": self.NAME,
+                                "title": title,
+                                "year": "-",
+                                "season": "-",
+                                "episode": "-",
+                                "language": lang_str,
+                                "release": f"{size} | Seeders: {seeders}",
+                                "uploader": "Nyaa",
+                                "download_count": seeders,
+                                "file_id": link,
+                                "file_name": title + (".torrent" if not link.startswith("magnet:") else ".magnet"),
+                                "_engine": self,
+                            })
+                except Exception as rss_err:
+                    print(f"Nyaa.si Hatası ({q}): {e} / RSS: {rss_err}")
 
         return results
 
@@ -530,50 +624,111 @@ class NyaaEngine:
             if url.startswith("magnet:"):
                 return url.encode("utf-8"), "download.magnet"
             else:
-                resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
+                resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}, timeout=30)
                 resp.raise_for_status()
-                return resp.content, "anime.torrent"
+                cd = resp.headers.get("content-disposition", "")
+                filename = None
+                if "filename=" in cd:
+                    m = re.search(r'filename=["\']?([^"\';]+)["\']?', cd)
+                    if m:
+                        filename = m.group(1).strip()
+                if not filename:
+                    m = re.search(r'/download/(\d+)\.torrent', url)
+                    if m:
+                        filename = f"nyaa_{m.group(1)}.torrent"
+                return resp.content, filename or "anime.torrent"
         except Exception as e:
             raise Exception(f"Nyaa indirme hatası: {str(e)}")
 
 
 class SubsPleaseEngine:
-    """SubsPlease anime salımlarını arar (Nyaa & SubsPlease RSS)."""
+    """SubsPlease anime salımlarını arar (Nyaa & SubsPlease API)."""
 
     NAME = "SubsPlease"
 
     def search(self, query, language=""):
         results = []
+        seen_links = set()
         try:
             q = f"SubsPlease {query}"
-            url = f"https://nyaa.si/?page=rss&q={requests.utils.quote(q)}"
-            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-            resp = requests.get(url, headers=headers, timeout=12)
-            if resp.status_code == 200:
-                root = ET.fromstring(resp.content)
-                ns = {"nyaa": "https://nyaa.si/xmlns/nyaa"}
-                for item in root.findall("./channel/item")[:30]:
-                    title = item.find("title").text if item.find("title") is not None else ""
-                    link = item.find("link").text if item.find("link") is not None else ""
-                    size = item.find("nyaa:size", ns).text if item.find("nyaa:size", ns) is not None else "?"
-                    seeders = item.find("nyaa:seeders", ns).text if item.find("nyaa:seeders", ns) is not None else "?"
+            if nyaa_api:
+                api_res = nyaa_api.search_nyaa(
+                    query=q,
+                    category=nyaa_api.CATEGORIES.ANIME.ALL,
+                    filter=nyaa_api.FILTER_TYPES.NO_FILTER,
+                    sort_by=nyaa_api.SORT_FIELDS.SEEDERS,
+                    sort_order=nyaa_api.SORT_ORDERS.DESCENDING,
+                    timeout=12,
+                )
+                items = api_res.get("results", [])[:30]
+            else:
+                items = []
 
-                    results.append({
-                        "source": self.NAME,
-                        "title": title,
-                        "year": "-",
-                        "season": "-",
-                        "episode": "-",
-                        "language": "SubsPlease (Multi-Sub)",
-                        "release": f"{size} | Seeders: {seeders}",
-                        "uploader": "SubsPlease",
-                        "download_count": seeders,
-                        "file_id": link,
-                        "file_name": title + (".torrent" if not link.startswith("magnet:") else ".magnet"),
-                        "_engine": self,
-                    })
+            for item in items:
+                title = item.get("title", "")
+                torrent_url = item.get("torrent_url")
+                magnet_link = item.get("magnet_link")
+                view_url = item.get("view_url")
+                link = torrent_url or magnet_link or view_url
+
+                if not link or link in seen_links:
+                    continue
+                seen_links.add(link)
+
+                size = item.get("file_size", "?")
+                seeders = str(item.get("seeders", 0))
+                leechers = str(item.get("leechers", 0))
+
+                safe_title = "".join(c for c in title if c not in r'\/:*?"<>|').strip() or "subsplease_release"
+                file_name = f"{safe_title}.torrent" if torrent_url else f"{safe_title}.magnet"
+
+                results.append({
+                    "source": self.NAME,
+                    "title": title,
+                    "year": "-",
+                    "season": "-",
+                    "episode": "-",
+                    "language": "SubsPlease (Multi-Sub)",
+                    "release": f"{size} | Seed: {seeders} | Leech: {leechers}",
+                    "uploader": "SubsPlease",
+                    "download_count": seeders,
+                    "file_id": link,
+                    "file_name": file_name,
+                    "_engine": self,
+                    "torrent_url": torrent_url,
+                    "magnet_link": magnet_link,
+                    "info_hash": item.get("info_hash"),
+                })
         except Exception as e:
-            print(f"SubsPlease Hatası: {e}")
+            # Fallback RSS
+            try:
+                url = f"https://nyaa.si/?page=rss&q={requests.utils.quote(f'SubsPlease {query}')}"
+                headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+                resp = requests.get(url, headers=headers, timeout=12)
+                if resp.status_code == 200:
+                    root = ET.fromstring(resp.content)
+                    ns = {"nyaa": "https://nyaa.si/xmlns/nyaa"}
+                    for item in root.findall("./channel/item")[:30]:
+                        title = item.find("title").text if item.find("title") is not None else ""
+                        link = item.find("link").text if item.find("link") is not None else ""
+                        size = item.find("nyaa:size", ns).text if item.find("nyaa:size", ns) is not None else "?"
+                        seeders = item.find("nyaa:seeders", ns).text if item.find("nyaa:seeders", ns) is not None else "?"
+                        results.append({
+                            "source": self.NAME,
+                            "title": title,
+                            "year": "-",
+                            "season": "-",
+                            "episode": "-",
+                            "language": "SubsPlease (Multi-Sub)",
+                            "release": f"{size} | Seeders: {seeders}",
+                            "uploader": "SubsPlease",
+                            "download_count": seeders,
+                            "file_id": link,
+                            "file_name": title + (".torrent" if not link.startswith("magnet:") else ".magnet"),
+                            "_engine": self,
+                        })
+            except Exception as rss_err:
+                print(f"SubsPlease Hatası: {e} / RSS: {rss_err}")
         return results
 
     def download(self, url):
@@ -583,9 +738,16 @@ class SubsPleaseEngine:
             else:
                 resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
                 resp.raise_for_status()
-                return resp.content, "subsplease.torrent"
+                cd = resp.headers.get("content-disposition", "")
+                filename = None
+                if "filename=" in cd:
+                    m = re.search(r'filename=["\']?([^"\';]+)["\']?', cd)
+                    if m:
+                        filename = m.group(1).strip()
+                return resp.content, filename or "subsplease.torrent"
         except Exception as e:
             raise Exception(f"SubsPlease indirme hatası: {str(e)}")
+
 
 
 class AnimeToshoEngine:
@@ -666,6 +828,157 @@ class AnimeToshoEngine:
                 return resp.content, "animetosho.torrent"
         except Exception as e:
             raise Exception(f"AnimeTosho indirme hatası: {str(e)}")
+
+
+class NekoBTEngine:
+    """nekoBT (https://nekobt.to) Torznab RSS & API ile anime torrent, fansub & altyazılı salımları arar."""
+
+    NAME = "nekoBT"
+
+    def __init__(self, api_key=None):
+        self.api_key = api_key
+
+    def search(self, query, language=""):
+        results = []
+        seen_links = set()
+
+        queries_to_try = [query]
+        q_lower = query.lower()
+        if "turkish" not in q_lower and "türkçe" not in q_lower and "tr" not in q_lower.split():
+            queries_to_try.append(f"{query} Turkish")
+            queries_to_try.append(f"{query} TR")
+
+        for q in queries_to_try:
+            try:
+                if nekobt_api:
+                    data = nekobt_api.search_nekobt(
+                        query=q,
+                        apikey=self.api_key,
+                        limit=35,
+                        timeout=12,
+                    )
+                    items = data.get("results", [])
+                else:
+                    # Doğrudan Torznab RSS yedek arama
+                    headers = {"User-Agent": f"NollySub v{APP_VERSION} Mozilla/5.0"}
+                    q_enc = requests.utils.quote(q)
+                    api_param = f"&apikey={self.api_key}" if self.api_key else ""
+                    url = f"https://nekobt.to/api/torznab/api?t=search&q={q_enc}{api_param}"
+                    resp = requests.get(url, headers=headers, timeout=12)
+                    items = []
+                    if resp.status_code == 200:
+                        root = ET.fromstring(resp.content)
+                        ns = {"torznab": "http://torznab.com/schemas/2015/feed"}
+                        for it in root.findall(".//item")[:35]:
+                            t_el = it.find("title")
+                            g_el = it.find("guid")
+                            l_el = it.find("link")
+                            title_txt = t_el.text if t_el is not None and t_el.text else ""
+                            guid_txt = g_el.text if g_el is not None and g_el.text else ""
+                            link_txt = l_el.text if l_el is not None and l_el.text else ""
+                            attrs = {a.attrib.get("name"): a.attrib.get("value", "") for a in it.findall("torznab:attr", ns)}
+                            tid = re.search(r"/torrents/(\d+)", guid_txt)
+                            tid_str = tid.group(1) if tid else ""
+                            items.append({
+                                "id": tid_str,
+                                "title": title_txt,
+                                "guid": guid_txt,
+                                "view_url": guid_txt,
+                                "torrent_url": f"https://nekobt.to/api/v1/torrents/{tid_str}/download" if tid_str else "",
+                                "magnet_link": attrs.get("magneturl") or (link_txt if link_txt.startswith("magnet:") else ""),
+                                "size_human": "?",
+                                "seeders": int(attrs.get("seeders", 0)) if attrs.get("seeders", "").isdigit() else 0,
+                                "leechers": int(attrs.get("leechers", 0)) if attrs.get("leechers", "").isdigit() else 0,
+                                "info_hash": attrs.get("infohash", ""),
+                                "tags": {},
+                                "has_turkish_sub": any(k in title_txt.lower() for k in ["tr", "turkish", "türkçe", "tac", "oishi"]),
+                                "uploader": "nekoBT",
+                            })
+
+                for item in items:
+                    title = item.get("title", "")
+                    torrent_url = item.get("torrent_url")
+                    magnet_link = item.get("magnet_link")
+                    guid = item.get("guid") or item.get("view_url")
+                    link = torrent_url or magnet_link or guid
+
+                    if not link or link in seen_links:
+                        continue
+                    seen_links.add(link)
+
+                    size = item.get("size_human", "?")
+                    seeders = str(item.get("seeders", 0))
+                    leechers = str(item.get("leechers", 0))
+                    has_tr = item.get("has_turkish_sub", False)
+                    tags = item.get("tags", {})
+                    level = tags.get("level", "")
+                    level_str = f" [{level}]" if level else ""
+
+                    if has_tr:
+                        lang_str = "🇹🇷 Türkçe (Multi-Sub)"
+                    elif tags.get("sub_langs"):
+                        sub_count = len(tags["sub_langs"])
+                        if "en" in tags["sub_langs"] and sub_count == 1:
+                            lang_str = "🇬🇧 English Subbed"
+                        else:
+                            lang_str = f"🌐 Multi-Sub ({sub_count})"
+                    elif tags.get("audio_langs") and "ja" in tags["audio_langs"] and not tags.get("sub_langs"):
+                        lang_str = "🇯🇵 Raw / Japanese"
+                    else:
+                        lang_str = "🌐 Multi / ENG"
+
+                    release_info = f"{size} | Seed: {seeders} | Leech: {leechers}{level_str}"
+                    uploader_name = item.get("uploader") or "nekoBT"
+
+                    safe_title = "".join(c for c in title if c not in r'\/:*?"<>|').strip() or "nekobt_release"
+                    file_name = f"{safe_title}.torrent" if torrent_url else f"{safe_title}.magnet"
+
+                    results.append({
+                        "source": self.NAME,
+                        "title": title,
+                        "year": "-",
+                        "season": "-",
+                        "episode": "-",
+                        "language": lang_str,
+                        "release": release_info,
+                        "uploader": uploader_name,
+                        "download_count": seeders,
+                        "file_id": link,
+                        "file_name": file_name,
+                        "_engine": self,
+                        "torrent_url": torrent_url,
+                        "magnet_link": magnet_link,
+                        "info_hash": item.get("info_hash"),
+                        "seeders": item.get("seeders", 0),
+                        "leechers": item.get("leechers", 0),
+                        "downloads": item.get("downloads", 0),
+                        "tags": tags,
+                        "view_url": guid,
+                    })
+            except Exception as e:
+                print(f"nekoBT Hatası ({q}): {e}")
+
+        return results
+
+    def download(self, url):
+        """Torrent dosyasını veya magnet linkini indirir/kaydeder."""
+        try:
+            if url.startswith("magnet:"):
+                return url.encode("utf-8"), "download.magnet"
+            elif nekobt_api:
+                return nekobt_api.download_torrent_file(url, apikey=self.api_key)
+            else:
+                resp = requests.get(url, headers={"User-Agent": f"NollySub v{APP_VERSION} Mozilla/5.0"}, timeout=30)
+                resp.raise_for_status()
+                cd = resp.headers.get("content-disposition", "")
+                filename = None
+                if "filename=" in cd:
+                    m = re.search(r'filename=["\']?([^"\';]+)["\']?', cd)
+                    if m:
+                        filename = urllib.parse.unquote(m.group(1).strip())
+                return resp.content, filename or "nekobt_release.torrent"
+        except Exception as e:
+            raise Exception(f"nekoBT indirme hatası: {str(e)}")
 
 
 # ══════════════════════════════════════════════════════
@@ -1597,6 +1910,7 @@ class NollySubApp:
         self.engines.append(NyaaEngine())
         self.engines.append(SubsPleaseEngine())
         self.engines.append(AnimeToshoEngine())
+        self.engines.append(NekoBTEngine(self.config.get_nekobt_key()))
 
         os_key = self.config.get_opensubtitles_key()
         if os_key:
@@ -1916,6 +2230,7 @@ class NollySubApp:
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
         self.tree.bind("<Double-1>", lambda e: self._download_selected())
+        self.tree.bind("<Button-3>", self._show_tree_context_menu)
 
     def _build_footer(self, parent):
         """Alt çubuk (Durum ve İndirme Butonu)."""
@@ -2035,6 +2350,61 @@ class NollySubApp:
 
         self.tree.tag_configure("tr_row", foreground="#4ade80")
 
+    def _show_tree_context_menu(self, event):
+        """Arama sonuçları tablosunda sağ tıklama bağlam menüsü gösterir."""
+        row_id = self.tree.identify_row(event.y)
+        if not row_id:
+            return
+        self.tree.selection_set(row_id)
+        try:
+            idx = int(row_id)
+            item = self.results[idx]
+        except (ValueError, IndexError):
+            return
+
+        menu = tk.Menu(self.root, tearoff=0,
+                       bg=COLORS["bg_surface"], fg=COLORS["text_primary"],
+                       activebackground=COLORS["accent"], activeforeground="white",
+                       font=("Segoe UI", 9))
+
+        menu.add_command(label="⬇  Seçileni İndir (.torrent / Altyazı)",
+                         command=self._download_selected)
+
+        magnet = item.get("magnet_link") or (item.get("file_id") if str(item.get("file_id", "")).startswith("magnet:") else None)
+        if magnet:
+            def copy_magnet():
+                self.root.clipboard_clear()
+                self.root.clipboard_append(magnet)
+                self.status_label.config(text="🧲 Magnet bağlantısı panoya kopyalandı!", fg=COLORS["success"])
+
+            def open_magnet():
+                try:
+                    os.startfile(magnet)
+                    self.status_label.config(text="🚀 Magnet torrent istemcisinde açıldı.", fg=COLORS["info"])
+                except Exception as ex:
+                    messagebox.showerror("Hata", f"Torrent istemcisi başlatılamadı:\n{ex}")
+
+            menu.add_command(label="🧲  Magnet Bağlantısını Kopyala", command=copy_magnet)
+            menu.add_command(label="🚀  Torrent İstemcisinde Aç (Magnet)", command=open_magnet)
+
+        view_url = item.get("view_url") or item.get("guid") or item.get("comments")
+        if view_url and str(view_url).startswith("http"):
+            menu.add_command(label="🌐  Sitede Görüntüle (Tarayıcı)",
+                             command=lambda: webbrowser.open(view_url))
+
+        def copy_title():
+            self.root.clipboard_clear()
+            self.root.clipboard_append(item.get("title", ""))
+            self.status_label.config(text="📋 Başlık panoya kopyalandı.", fg=COLORS["info"])
+
+        menu.add_separator()
+        menu.add_command(label="📋  Başlığı Kopyala", command=copy_title)
+
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
     def _download_selected(self):
         """Seçili altyazı veya torrent dosyasını indirir."""
         selected = self.tree.selection()
@@ -2107,7 +2477,7 @@ class NollySubApp:
         """API anahtarı ayarları iletişim kutusu."""
         ans = messagebox.askyesno(
             "API Ayarları Gerekli",
-            "NollySub varsayılan olarak AnimeTosho, Nyaa.si ve SubsPlease veritabanlarını kullanır.\n\n"
+            "NollySub varsayılan olarak nekoBT, AnimeTosho, Nyaa.si ve SubsPlease veritabanlarını kullanır.\n\n"
             "OpenSubtitles ve SubDL arşivlerine de erişebilmek için ücretsiz API anahtarı ekleyebilirsiniz.\n\n"
             "Şimdi Ayarları açmak ister misiniz?"
         )
@@ -2126,8 +2496,8 @@ class NollySubApp:
         """Gelişmiş Ayarlar Penceresi."""
         settings_win = tk.Toplevel(self.root)
         settings_win.title("⚙️ NollySub — Uygulama & API Ayarları")
-        settings_win.geometry("640x580")
-        settings_win.minsize(600, 550)
+        settings_win.geometry("640x660")
+        settings_win.minsize(600, 580)
         settings_win.configure(bg=COLORS["bg_deepest"])
         settings_win.transient(self.root)
         settings_win.grab_set()
@@ -2225,7 +2595,38 @@ class NollySubApp:
                            bg=COLORS["bg_surface"], fg=COLORS["text_muted"], font=("Segoe UI", 9))
         sd_hint.pack(anchor=tk.W)
 
-        # 3. İNDİRME KLASÖRÜ
+        # 3. NEKOBT API KEY (İSTEĞE BAĞLI)
+        neko_card = tk.Frame(content_frame, bg=COLORS["bg_surface"], padx=14, pady=12, highlightthickness=1, highlightbackground=COLORS["border"])
+        neko_card.pack(fill=tk.X, pady=(0, 12))
+
+        neko_title = tk.Label(neko_card, text="🐱 nekoBT (Anime Tracker) API Key (İsteğe Bağlı)", bg=COLORS["bg_surface"],
+                              fg=COLORS["text_primary"], font=("Segoe UI", 10, "bold"))
+        neko_title.pack(anchor=tk.W)
+
+        neko_row = tk.Frame(neko_card, bg=COLORS["bg_surface"])
+        neko_row.pack(fill=tk.X, pady=(6, 4))
+
+        neko_var = tk.StringVar(value=self.config.get_nekobt_key())
+        neko_entry = tk.Entry(neko_row, textvariable=neko_var, bg=COLORS["bg_input"],
+                              fg=COLORS["text_primary"], font=("Segoe UI", 10),
+                              relief="flat", highlightthickness=1, highlightbackground=COLORS["border"],
+                              highlightcolor=COLORS["accent"], insertbackground=COLORS["accent"])
+        neko_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=5, padx=(0, 8))
+
+        def open_neko_wiki():
+            webbrowser.open("https://wiki.nekobt.to")
+
+        neko_btn = tk.Button(neko_row, text="ℹ️ Info / Wiki Aç", bg=COLORS["info"], fg="white",
+                             font=("Segoe UI", 9, "bold"), relief="flat", cursor="hand2",
+                             activebackground="#2563eb", activeforeground="white",
+                             padx=10, pady=4, command=open_neko_wiki)
+        neko_btn.pack(side=tk.RIGHT)
+
+        neko_hint = tk.Label(neko_card, text="💡 nekoBT Torznab & RSS üzerinden çalışır; key olmadan da doğrudan aktiftir.",
+                             bg=COLORS["bg_surface"], fg=COLORS["text_muted"], font=("Segoe UI", 9))
+        neko_hint.pack(anchor=tk.W)
+
+        # 4. İNDİRME KLASÖRÜ
         dl_card = tk.Frame(content_frame, bg=COLORS["bg_surface"], padx=14, pady=12, highlightthickness=1, highlightbackground=COLORS["border"])
         dl_card.pack(fill=tk.X, pady=(0, 12))
 
@@ -2309,6 +2710,7 @@ class NollySubApp:
         def save_and_close():
             self.config.set_opensubtitles_key(os_var.get().strip())
             self.config.set_subdl_key(sd_var.get().strip())
+            self.config.set_nekobt_key(neko_var.get().strip())
             self.config.set_download_dir(dl_var.get().strip())
 
             self._init_engines()
