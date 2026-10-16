@@ -342,6 +342,7 @@ class OpenSubtitlesEngine:
 
                     feature = attr.get("feature_details", {})
                     title = feature.get("title", "") or feature.get("movie_name", "") or attr.get("release", "")
+                    view_url = attr.get("url") or (f"https://www.opensubtitles.com/en/subtitles/{item.get('id')}" if item.get('id') else None)
 
                     results.append({
                         "source": self.NAME,
@@ -355,6 +356,7 @@ class OpenSubtitlesEngine:
                         "download_count": str(attr.get("download_count", 0)),
                         "file_id": file_id,
                         "file_name": file_name,
+                        "view_url": view_url,
                         "_engine": self,
                     })
         except Exception as e:
@@ -445,6 +447,8 @@ class SubDLEngine:
             season = sub.get("season", "-")
             episode = sub.get("episode", "-")
 
+            view_url = f"https://subdl.com{url_path}" if url_path and not str(url_path).startswith("http") else (url_path or None)
+
             results.append({
                 "source": self.NAME,
                 "title": name,
@@ -457,6 +461,7 @@ class SubDLEngine:
                 "download_count": str(sub.get("hi", 0)),
                 "file_id": url_path,
                 "file_name": f"{release or name}.zip",
+                "view_url": view_url,
                 "_engine": self,
             })
         return results
@@ -568,6 +573,7 @@ class NyaaEngine:
                         "_engine": self,
                         "torrent_url": torrent_url,
                         "magnet_link": magnet_link,
+                        "view_url": view_url or (f"https://nyaa.si/view/{item.get('id')}" if item.get('id') else None),
                         "info_hash": item.get("info_hash"),
                         "file_size": size,
                         "seeders": item.get("seeders", 0),
@@ -594,6 +600,12 @@ class NyaaEngine:
                             seen_links.add(link)
                             size = item.find("nyaa:size", ns).text if item.find("nyaa:size", ns) is not None else "?"
                             seeders = item.find("nyaa:seeders", ns).text if item.find("nyaa:seeders", ns) is not None else "?"
+                            guid_el = item.find("guid")
+                            rss_view_url = guid_el.text if guid_el is not None and guid_el.text else None
+                            if not rss_view_url and link:
+                                m = re.search(r'/download/(\d+)\.torrent', link)
+                                if m:
+                                    rss_view_url = f"https://nyaa.si/view/{m.group(1)}"
                             title_lower = title.lower()
                             if any(k in title_lower for k in ["tr", "turkish", "türkçe", "turkce", "tac", "oishi"]):
                                 lang_str = "🇹🇷 Türkçe Subbed"
@@ -611,6 +623,7 @@ class NyaaEngine:
                                 "download_count": seeders,
                                 "file_id": link,
                                 "file_name": title + (".torrent" if not link.startswith("magnet:") else ".magnet"),
+                                "view_url": rss_view_url,
                                 "_engine": self,
                             })
                 except Exception as rss_err:
@@ -697,6 +710,7 @@ class SubsPleaseEngine:
                     "_engine": self,
                     "torrent_url": torrent_url,
                     "magnet_link": magnet_link,
+                    "view_url": view_url or (f"https://nyaa.si/view/{item.get('id')}" if item.get('id') else None),
                     "info_hash": item.get("info_hash"),
                 })
         except Exception as e:
@@ -713,6 +727,12 @@ class SubsPleaseEngine:
                         link = item.find("link").text if item.find("link") is not None else ""
                         size = item.find("nyaa:size", ns).text if item.find("nyaa:size", ns) is not None else "?"
                         seeders = item.find("nyaa:seeders", ns).text if item.find("nyaa:seeders", ns) is not None else "?"
+                        guid_el = item.find("guid")
+                        rss_view_url = guid_el.text if guid_el is not None and guid_el.text else None
+                        if not rss_view_url and link:
+                            m = re.search(r'/download/(\d+)\.torrent', link)
+                            if m:
+                                rss_view_url = f"https://nyaa.si/view/{m.group(1)}"
                         results.append({
                             "source": self.NAME,
                             "title": title,
@@ -725,6 +745,7 @@ class SubsPleaseEngine:
                             "download_count": seeders,
                             "file_id": link,
                             "file_name": title + (".torrent" if not link.startswith("magnet:") else ".magnet"),
+                            "view_url": rss_view_url,
                             "_engine": self,
                         })
             except Exception as rss_err:
@@ -798,6 +819,10 @@ class AnimeToshoEngine:
                         else:
                             lang_str = "🌐 Multi / ENG"
 
+                        view_url = item.get("link") or item.get("article_url")
+                        if not view_url and item.get("id"):
+                            view_url = f"https://animetosho.org/view/{item.get('id')}"
+
                         results.append({
                             "source": self.NAME,
                             "title": title,
@@ -810,6 +835,7 @@ class AnimeToshoEngine:
                             "download_count": str(seeders),
                             "file_id": link,
                             "file_name": title + (".torrent" if torrent_url else ".magnet"),
+                            "view_url": view_url,
                             "_engine": self,
                         })
             except Exception as e:
@@ -1899,6 +1925,7 @@ class NollySubApp:
         self.config = ConfigManager()
         self.engines = []
         self.results = []
+        self._pending_tree_click = None
         self._init_engines()
         self._build_ui()
 
@@ -2210,8 +2237,8 @@ class NollySubApp:
         columns = ("source", "title", "language", "release", "download_count")
         self.tree = ttk.Treeview(container, columns=columns, show="headings", style="Dark.Treeview", selectmode="browse")
 
-        self.tree.heading("source", text="Kaynak", anchor=tk.W)
-        self.tree.heading("title", text="Başlık / Dosya Adı", anchor=tk.W)
+        self.tree.heading("source", text="Kaynak 🌐", anchor=tk.W)
+        self.tree.heading("title", text="Başlık / Dosya Adı 🔗", anchor=tk.W)
         self.tree.heading("language", text="Dil", anchor=tk.CENTER)
         self.tree.heading("release", text="Sürüm / Detay", anchor=tk.W)
         self.tree.heading("download_count", text="İndirme / Seeds", anchor=tk.E)
@@ -2229,8 +2256,11 @@ class NollySubApp:
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        self.tree.bind("<Double-1>", lambda e: self._download_selected())
+        self.tree.bind("<Button-1>", self._on_tree_click)
+        self.tree.bind("<Double-1>", self._on_tree_double_click)
         self.tree.bind("<Button-3>", self._show_tree_context_menu)
+        self.tree.bind("<Motion>", self._on_tree_motion)
+        self.tree.bind("<Leave>", lambda e: self.tree.config(cursor=""))
 
     def _build_footer(self, parent):
         """Alt çubuk (Durum ve İndirme Butonu)."""
@@ -2252,7 +2282,7 @@ class NollySubApp:
         # İlerleme çubuğu (Özel stillendirilmiş)
         self.progress = ttk.Progressbar(status_frame, mode="indeterminate", length=180, style="Custom.Horizontal.TProgressbar")
 
-        # Sağ: İndir Butonu
+        # Sağ: İndir Butonu ve Sitede Aç Butonu
         self.download_btn = tk.Button(footer,
                                       text="⬇  Seçileni İndir",
                                       bg=COLORS["accent"], fg="white",
@@ -2263,6 +2293,17 @@ class NollySubApp:
                                       padx=20, pady=6,
                                       command=self._download_selected)
         self.download_btn.pack(side=tk.RIGHT, padx=20, pady=10)
+
+        self.open_site_btn = tk.Button(footer,
+                                       text="🌐  Sitede Aç (Nyaa/Kaynak)",
+                                       bg=COLORS["bg_elevated"], fg=COLORS["text_primary"],
+                                       font=("Segoe UI", 10),
+                                       relief="flat", cursor="hand2",
+                                       activebackground=COLORS["bg_surface"],
+                                       activeforeground=COLORS["accent_light"],
+                                       padx=16, pady=6,
+                                       command=self._open_selected_url)
+        self.open_site_btn.pack(side=tk.RIGHT, padx=(0, 0), pady=10)
 
     # ── İŞLEMLER VE MANTIKSAL AKIŞ ──
 
@@ -2333,7 +2374,7 @@ class NollySubApp:
 
         tr_count = sum(1 for r in results if is_tr_subtitle(r))
         self.status_label.config(text=f"Toplam {len(results)} sonuç bulundu ({tr_count} Türkçe).", fg=COLORS["success"])
-        self.results_label.config(text=f"'{query}' — {len(results)} Sonuç ({tr_count} Türkçe)")
+        self.results_label.config(text=f"'{query}' — {len(results)} Sonuç ({tr_count} Türkçe)  •  💡 Başlığa veya Kaynağa tıklayarak web sayfasına gidebilirsiniz")
 
         for idx, item in enumerate(results):
             tags = ()
@@ -2350,8 +2391,126 @@ class NollySubApp:
 
         self.tree.tag_configure("tr_row", foreground="#4ade80")
 
+    def _get_item_url(self, item):
+        """Verilen arama sonucunun ait olduğu web sitesi sayfasının URL'sini (Nyaa, AnimeTosho vb.) döndürür."""
+        if not item:
+            return None
+
+        # 1. Doğrudan saklanan view_url, guid, link veya comments kontrolü
+        url = item.get("view_url") or item.get("guid") or item.get("comments") or item.get("link")
+        if url and str(url).startswith("http") and not str(url).endswith(".torrent"):
+            return str(url)
+
+        # 2. Torrent veya indirme linkinden sayfa URL'si çıkarma
+        t_url = str(item.get("torrent_url") or item.get("file_id") or "")
+        if "nyaa.si" in t_url:
+            m = re.search(r'/download/(\d+)\.torrent', t_url) or re.search(r'/view/(\d+)', t_url)
+            if m:
+                return f"https://nyaa.si/view/{m.group(1)}"
+            return "https://nyaa.si"
+
+        if "animetosho.org" in t_url:
+            m = re.search(r'/(?:view|torrent)/(\d+)', t_url) or re.search(r'id=(\d+)', t_url)
+            if m:
+                return f"https://animetosho.org/view/{m.group(1)}"
+            return "https://animetosho.org"
+
+        if "nekobt.to" in t_url:
+            m = re.search(r'/torrents/(\d+)', t_url)
+            if m:
+                return f"https://nekobt.to/torrents/{m.group(1)}"
+            return "https://nekobt.to"
+
+        # 3. Kaynak adına göre özel fallback arama linki
+        source = str(item.get("source", "")).lower()
+        title = str(item.get("title", ""))
+        q_enc = requests.utils.quote(title) if title else ""
+
+        if "nyaa" in source:
+            return f"https://nyaa.si/?f=0&c=0_0&q={q_enc}" if q_enc else "https://nyaa.si"
+        elif "animetosho" in source:
+            return f"https://animetosho.org/search?q={q_enc}" if q_enc else "https://animetosho.org"
+        elif "nekobt" in source:
+            return f"https://nekobt.to/torrents?q={q_enc}" if q_enc else "https://nekobt.to"
+        elif "subsplease" in source:
+            return f"https://subsplease.org/?s={q_enc}" if q_enc else "https://subsplease.org"
+        elif "opensubtitles" in source:
+            return f"https://www.opensubtitles.com/en/search/sublanguageid-tur/query/{q_enc}" if q_enc else "https://www.opensubtitles.com"
+        elif "subdl" in source:
+            return f"https://subdl.com/search/{q_enc}" if q_enc else "https://subdl.com"
+
+        return None
+
+    def _open_selected_url(self, row_id=None):
+        """Seçili satırın orijinal web sitesi sayfasını varsayılan tarayıcıda açar."""
+        if row_id is None:
+            selected = self.tree.selection()
+            if not selected:
+                messagebox.showinfo("Bilgi", "Lütfen web sayfasını açmak için tablodan bir satır seçin.")
+                return
+            row_id = selected[0]
+
+        try:
+            idx = int(row_id)
+            item = self.results[idx]
+        except (ValueError, IndexError):
+            return
+
+        url = self._get_item_url(item)
+        if url:
+            try:
+                webbrowser.open(url)
+                source_name = item.get("source", "Kaynak")
+                self.status_label.config(text=f"🌐 {source_name} sayfası açıldı: {url}", fg=COLORS["info"])
+            except Exception as e:
+                messagebox.showerror("Hata", f"Web tarayıcısı başlatılamadı:\n{e}")
+        else:
+            messagebox.showinfo("Bilgi", "Bu öge için web bağlantısı bulunamadı.")
+
+    def _on_tree_click(self, event):
+        """Tabloda bir hücreye tıklandığında çalışır."""
+        region = self.tree.identify_region(event.x, event.y)
+        col = self.tree.identify_column(event.x, event.y)
+        row_id = self.tree.identify_row(event.y)
+
+        if self._pending_tree_click:
+            self.root.after_cancel(self._pending_tree_click)
+            self._pending_tree_click = None
+
+        if not row_id:
+            return
+
+        self.tree.selection_set(row_id)
+
+        # Eğer Kaynak (#1) veya Başlık / Dosya Adı (#2) sütununa tıklandıysa web linkini aç
+        # Çift tıklama (indirme) ile çakışmayı önlemek için 220ms sonra tetiklenir
+        if region == "cell" and col in ("#1", "#2"):
+            self._pending_tree_click = self.root.after(220, lambda r=row_id: self._open_selected_url(r))
+
+    def _on_tree_double_click(self, event):
+        """Çift tıklandığında bekleyen tek tık link zamanlayıcısını iptal eder ve indirmeyi başlatır."""
+        if self._pending_tree_click:
+            self.root.after_cancel(self._pending_tree_click)
+            self._pending_tree_click = None
+
+        self._download_selected()
+
+    def _on_tree_motion(self, event):
+        """Fare Başlık veya Kaynak sütunları üzerindeyken el imleci (tıklanabilir link) gösterir."""
+        region = self.tree.identify_region(event.x, event.y)
+        col = self.tree.identify_column(event.x, event.y)
+        row_id = self.tree.identify_row(event.y)
+        if region == "cell" and col in ("#1", "#2") and row_id:
+            self.tree.config(cursor="hand2")
+        else:
+            self.tree.config(cursor="")
+
     def _show_tree_context_menu(self, event):
         """Arama sonuçları tablosunda sağ tıklama bağlam menüsü gösterir."""
+        if self._pending_tree_click:
+            self.root.after_cancel(self._pending_tree_click)
+            self._pending_tree_click = None
+
         row_id = self.tree.identify_row(event.y)
         if not row_id:
             return
@@ -2370,6 +2529,13 @@ class NollySubApp:
         menu.add_command(label="⬇  Seçileni İndir (.torrent / Altyazı)",
                          command=self._download_selected)
 
+        # Doğrudan web sitesi sayfasını açma seçeneği
+        url = self._get_item_url(item)
+        if url:
+            source_name = item.get("source", "Kaynak")
+            menu.add_command(label=f"🌐  {source_name} Sayfasını Aç (Tarayıcı)",
+                             command=lambda: webbrowser.open(url))
+
         magnet = item.get("magnet_link") or (item.get("file_id") if str(item.get("file_id", "")).startswith("magnet:") else None)
         if magnet:
             def copy_magnet():
@@ -2386,11 +2552,6 @@ class NollySubApp:
 
             menu.add_command(label="🧲  Magnet Bağlantısını Kopyala", command=copy_magnet)
             menu.add_command(label="🚀  Torrent İstemcisinde Aç (Magnet)", command=open_magnet)
-
-        view_url = item.get("view_url") or item.get("guid") or item.get("comments")
-        if view_url and str(view_url).startswith("http"):
-            menu.add_command(label="🌐  Sitede Görüntüle (Tarayıcı)",
-                             command=lambda: webbrowser.open(view_url))
 
         def copy_title():
             self.root.clipboard_clear()
