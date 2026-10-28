@@ -32,6 +32,7 @@ import webbrowser
 import configparser
 import xml.etree.ElementTree as ET
 import re
+import ctypes
 from pathlib import Path
 
 try:
@@ -70,7 +71,7 @@ except ImportError:
 
 APP_NAME = "NollySub"
 APP_VERSION = "1.2.0"
-APP_TITLE = f"{APP_NAME} — Anime Türkçe Altyazı İndirici v{APP_VERSION}"
+APP_TITLE = f"{APP_NAME} — Anime Altyazı & Salım Toplayıcı v{APP_VERSION}"
 
 CONFIG_DIR = Path.home() / ".nollysub"
 CONFIG_FILE = CONFIG_DIR / "config.ini"
@@ -82,30 +83,66 @@ SUBDL_API = "https://api.subdl.com/api/v1"
 ANIMETOSHO_API = "https://feed.animetosho.org/json"
 
 # ══════════════════════════════════════════════════════
-# RENK TEMASI (Karanlık Tema)
+# RENK TEMASI (Windows 11 Fluent Design — Mica Dark)
 # ══════════════════════════════════════════════════════
 
 COLORS = {
-    "bg_deepest": "#0a0a14",
-    "bg_deep": "#0f0f1e",
-    "bg_surface": "#161628",
-    "bg_elevated": "#1c1c36",
-    "bg_input": "#12122a",
-    "accent": "#E50914",
-    "accent_hover": "#ff2d38",
-    "accent_light": "#ff6b6b",
-    "success": "#22c55e",
-    "info": "#3b82f6",
-    "warning": "#f59e0b",
-    "text_primary": "#e4e4e7",
-    "text_secondary": "#a1a1aa",
-    "text_muted": "#71717a",
-    "text_faint": "#52525b",
-    "border": "#2a2a4a",
-    "border_light": "#3a3a5a",
-    "highlight_row": "#1a1a3e",
-    "scrollbar": "#3a3a5a",
+    "bg_deepest": "#202020",      # Windows 11 Dark Mica canvas
+    "bg_deep": "#1a1a1a",         # Inset containers
+    "bg_surface": "#2b2b2b",      # Fluent Card Surface
+    "bg_elevated": "#323232",     # Elevated card / dropdown / dialog
+    "bg_hover": "#3a3a3a",        # Hover state
+    "bg_input": "#1f1f1f",        # Fluent input background
+    "accent": "#0078d4",          # Windows 11 Fluent Blue Accent
+    "accent_hover": "#1084d9",    # Accent hover
+    "accent_light": "#60cdff",    # Accent light / active highlight
+    "accent_pressed": "#0067b8",  # Accent pressed
+    "border": "#3c3c3c",          # Fluent subtle border
+    "border_light": "#4a4a4a",    # Fluent light border
+    "border_card": "#333333",     # Card border
+    "text_primary": "#ffffff",    # Fluent primary text
+    "text_secondary": "#cccccc",  # Fluent secondary text
+    "text_muted": "#8c8c8c",      # Muted text
+    "text_faint": "#606060",      # Placeholder / faint
+    "success": "#6ccb5f",         # Fluent green
+    "info": "#60cdff",            # Fluent info blue
+    "warning": "#fce100",         # Fluent warning yellow
+    "danger": "#ff6f61",          # Fluent danger red
+    "highlight_row": "#26354a",   # Fluent blue row selection
+    "scrollbar": "#4a4a4a",
 }
+
+def apply_fluent_window_theme(win, min_w=920, min_h=600):
+    """Windows Fluent tasarım dark başlık çubuğu ve responsive pencere ayarlarını uygular."""
+    try:
+        win.minsize(min_w, min_h)
+        win.resizable(True, True)
+    except Exception:
+        pass
+    try:
+        win.update_idletasks()
+        hwnd = ctypes.windll.user32.GetParent(win.winfo_id())
+        if not hwnd:
+            hwnd = win.winfo_id()
+        val = ctypes.c_int(1)
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(val), ctypes.sizeof(val))
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 19, ctypes.byref(val), ctypes.sizeof(val))
+    except Exception:
+        pass
+
+def center_window(win, width, height):
+    """Pencereyi ekranda orantılı, taşmayacak ve tam oturacak şekilde ortalar."""
+    try:
+        win.update_idletasks()
+        sw = win.winfo_screenwidth()
+        sh = win.winfo_screenheight()
+        w = min(width, int(sw * 0.94))
+        h = min(height, int(sh * 0.92))
+        x = max(0, (sw - w) // 2)
+        y = max(0, (sh - h) // 2)
+        win.geometry(f"{w}x{h}+{x}+{y}")
+    except Exception:
+        win.geometry(f"{width}x{height}")
 
 LANG_MAP = {
     "tur": "Türkçe 🇹🇷",
@@ -320,17 +357,18 @@ class OpenSubtitlesEngine:
             "Content-Type": "application/json",
         }
 
-    def search(self, query, language="tr"):
+    def search(self, query, language=""):
         results = []
         try:
             url = f"{OPENSUBTITLES_API}/subtitles"
             params = {
                 "query": query,
-                "languages": language,
                 "type": "all",
                 "order_by": "download_count",
                 "order_direction": "desc",
             }
+            if language:
+                params["languages"] = language
             resp = requests.get(url, headers=self.headers, params=params, timeout=15)
             if resp.status_code == 200:
                 data = resp.json()
@@ -393,16 +431,17 @@ class SubDLEngine:
     def __init__(self, api_key):
         self.api_key = api_key
 
-    def search(self, query, language="sd_tr"):
+    def search(self, query, language=""):
         results = []
         try:
             url = f"{SUBDL_API}/subtitles"
             params = {
                 "api_key": self.api_key,
                 "file_name": query,
-                "languages": "tr,en",
                 "type": "all",
             }
+            if language:
+                params["languages"] = language
             resp = requests.get(url, params=params, timeout=15)
             if resp.status_code == 200:
                 data = resp.json()
@@ -414,9 +453,10 @@ class SubDLEngine:
             params2 = {
                 "api_key": self.api_key,
                 "film_name": query,
-                "languages": "tr,en",
                 "type": "all",
             }
+            if language:
+                params2["languages"] = language
             resp2 = requests.get(url2, params=params2, timeout=15)
             if resp2.status_code == 200:
                 data2 = resp2.json()
@@ -500,10 +540,6 @@ class NyaaEngine:
         seen_links = set()
 
         queries_to_try = [query]
-        q_lower = query.lower()
-        if "turkish" not in q_lower and "türkçe" not in q_lower and "tr" not in q_lower.split():
-            queries_to_try.append(f"{query} Turkish")
-            queries_to_try.append(f"{query} TR")
 
         for q in queries_to_try:
             try:
@@ -781,9 +817,6 @@ class AnimeToshoEngine:
         seen_links = set()
 
         queries_to_try = [query]
-        if "turkish" not in query.lower() and "türkçe" not in query.lower() and "tr" not in query.lower().split():
-            queries_to_try.append(f"{query} Turkish")
-            queries_to_try.append(f"{query} TR")
 
         headers = {"User-Agent": f"NollySub v{APP_VERSION}"}
 
@@ -869,10 +902,6 @@ class NekoBTEngine:
         seen_links = set()
 
         queries_to_try = [query]
-        q_lower = query.lower()
-        if "turkish" not in q_lower and "türkçe" not in q_lower and "tr" not in q_lower.split():
-            queries_to_try.append(f"{query} Turkish")
-            queries_to_try.append(f"{query} TR")
 
         for q in queries_to_try:
             try:
@@ -1919,12 +1948,16 @@ class MkvToMp4Converter:
 # ══════════════════════════════════════════════════════
 
 class NollySubApp:
-    """NollySub Anime Türkçe Altyazı İndirici ana penceresi."""
+    """NollySub Anime Altyazı & Salım Toplayıcı ana penceresi (Windows Fluent Design)."""
 
     def __init__(self):
         self.config = ConfigManager()
         self.engines = []
+        self.all_results = []
         self.results = []
+        self.active_sources = set()
+        self.source_buttons = {}
+        self._last_query = ""
         self._pending_tree_click = None
         self._init_engines()
         self._build_ui()
@@ -1947,36 +1980,36 @@ class NollySubApp:
         if sd_key:
             self.engines.append(SubDLEngine(sd_key))
 
-    # ── UI OLUŞTURMA ──
+    # ── UI OLUŞTURMA (WINDOWS FLUENT DESIGN) ──
 
     def _build_ui(self):
         """Ana pencereyi oluştur."""
         self.root = tk.Tk()
         self.root.title(APP_TITLE)
-        self.root.geometry("1080x720")
-        self.root.minsize(850, 580)
+        center_window(self.root, 1160, 760)
+        apply_fluent_window_theme(self.root, 960, 620)
         self.root.configure(bg=COLORS["bg_deepest"])
 
         # Logo ve ikon yükleme
         self._load_app_icons()
 
-        # Stil ayarları
+        # Stil ayarları (Fluent Design ttk stilleri)
         self._configure_styles()
 
         # Ana çerçeve
         main_frame = tk.Frame(self.root, bg=COLORS["bg_deepest"])
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # Başlık çubuğu
+        # Başlık çubuğu (Fluent Header)
         self._build_header(main_frame)
 
-        # Arama bölümü
+        # Arama bölümü (Fluent Search Card)
         self._build_search_section(main_frame)
 
-        # Sonuç tablosu
+        # Sonuç tablosu ve Sağ Orta Filtre Çubuğu
         self._build_results_table(main_frame)
 
-        # Alt çubuk (durum + indirme)
+        # Alt çubuk (durum + indirme butonları)
         self._build_footer(main_frame)
 
         # Uyarılarda bulun
@@ -2002,22 +2035,22 @@ class NollySubApp:
         if target_img.exists() and HAS_PIL:
             try:
                 img = Image.open(target_img).convert("RGBA")
-                img = img.resize((42, 42), Image.Resampling.LANCZOS)
+                img = img.resize((40, 40), Image.Resampling.LANCZOS)
                 self.header_logo_photo = ImageTk.PhotoImage(img)
                 self.root.iconphoto(True, self.header_logo_photo)
             except Exception as e:
                 print("Logo yükleme uyarısı:", e)
 
     def _configure_styles(self):
-        """ttk stillerini yapılandır."""
+        """Windows Fluent Design ttk stillerini yapılandır."""
         style = ttk.Style()
         style.theme_use("clam")
 
-        # Treeview stili
+        # Treeview stili (Fluent Dark List)
         style.configure("Dark.Treeview",
-                        background=COLORS["bg_deep"],
+                        background=COLORS["bg_deepest"],
                         foreground=COLORS["text_primary"],
-                        fieldbackground=COLORS["bg_deep"],
+                        fieldbackground=COLORS["bg_deepest"],
                         borderwidth=0,
                         rowheight=38,
                         font=("Segoe UI", 10))
@@ -2035,57 +2068,70 @@ class NollySubApp:
                   foreground=[("selected", "#ffffff")])
 
         style.map("Dark.Treeview.Heading",
-                  background=[("active", COLORS["bg_elevated"])])
+                  background=[("active", COLORS["bg_elevated"])],
+                  foreground=[("active", "#ffffff")])
 
         # Scrollbar stili
         style.configure("Dark.Vertical.TScrollbar",
-                        background=COLORS["bg_surface"],
+                        background=COLORS["bg_elevated"],
                         troughcolor=COLORS["bg_deepest"],
                         bordercolor=COLORS["bg_deepest"],
                         arrowcolor=COLORS["text_muted"],
                         relief="flat")
 
-        # İlerleme Çubuğu (Progressbar) Stili
+        # İlerleme Çubuğu (Fluent Progressbar)
         style.configure("Custom.Horizontal.TProgressbar",
-                        troughcolor=COLORS["bg_deep"],
+                        troughcolor=COLORS["bg_input"],
                         background=COLORS["accent"],
-                        thickness=8,
+                        thickness=6,
                         borderwidth=0)
 
     def _build_header(self, parent):
-        """Üst başlık bölümü."""
-        header = tk.Frame(parent, bg=COLORS["bg_surface"], height=70)
+        """Üst başlık bölümü (Windows Fluent Header Bar)."""
+        header = tk.Frame(parent, bg=COLORS["bg_surface"], height=68,
+                          highlightthickness=1, highlightbackground=COLORS["border"])
         header.pack(fill=tk.X, side=tk.TOP)
         header.pack_propagate(False)
 
         # Logo ve Başlık
         logo_frame = tk.Frame(header, bg=COLORS["bg_surface"])
-        logo_frame.pack(side=tk.LEFT, padx=16)
+        logo_frame.pack(side=tk.LEFT, padx=18)
 
         if self.header_logo_photo:
             logo_box = tk.Label(logo_frame, image=self.header_logo_photo, bg=COLORS["bg_surface"])
             logo_box.pack(side=tk.LEFT, padx=(0, 10), pady=12)
         else:
             logo_box = tk.Label(logo_frame, text=" NS ", bg=COLORS["accent"],
-                                fg="white", font=("Segoe UI", 14, "bold"),
-                                padx=4, pady=2)
+                                fg="white", font=("Segoe UI", 13, "bold"),
+                                padx=6, pady=3)
             logo_box.pack(side=tk.LEFT, padx=(0, 10), pady=12)
 
-        title_label = tk.Label(logo_frame, text="NollySub",
+        title_box = tk.Frame(logo_frame, bg=COLORS["bg_surface"])
+        title_box.pack(side=tk.LEFT)
+
+        title_row = tk.Frame(title_box, bg=COLORS["bg_surface"])
+        title_row.pack(anchor=tk.W)
+
+        title_label = tk.Label(title_row, text="NollySub",
                                bg=COLORS["bg_surface"],
                                fg=COLORS["text_primary"],
-                               font=("Segoe UI", 18, "bold"))
+                               font=("Segoe UI", 16, "bold"))
         title_label.pack(side=tk.LEFT)
 
-        subtitle_label = tk.Label(logo_frame, text="Anime Türkçe Altyazı & Torrent İndirici",
+        ver_badge = tk.Label(title_row, text=f" v{APP_VERSION} ",
+                             bg=COLORS["bg_elevated"], fg=COLORS["accent_light"],
+                             font=("Segoe UI", 8, "bold"), padx=4, pady=1)
+        ver_badge.pack(side=tk.LEFT, padx=8)
+
+        subtitle_label = tk.Label(title_box, text="Anime Altyazı & Salım Toplayıcı",
                                   bg=COLORS["bg_surface"],
                                   fg=COLORS["text_muted"],
                                   font=("Segoe UI", 9))
-        subtitle_label.pack(side=tk.LEFT, padx=(8, 0), pady=(4, 0))
+        subtitle_label.pack(anchor=tk.W, pady=(1, 0))
 
-        # Sağ taraf butonlar
+        # Sağ taraf butonlar (Fluent Action Toolbar)
         btn_frame = tk.Frame(header, bg=COLORS["bg_surface"])
-        btn_frame.pack(side=tk.RIGHT, padx=16)
+        btn_frame.pack(side=tk.RIGHT, padx=18)
 
         # Araçlar Menüsü
         self.tools_menu = tk.Menu(self.root, tearoff=0,
@@ -2111,7 +2157,7 @@ class NollySubApp:
                               bg=COLORS["bg_elevated"], fg=COLORS["text_primary"],
                               font=("Segoe UI", 9, "bold"),
                               relief="flat", cursor="hand2",
-                              activebackground=COLORS["border_light"],
+                              activebackground=COLORS["bg_hover"],
                               activeforeground="white",
                               padx=12, pady=5,
                               command=_popup_tools_menu)
@@ -2121,7 +2167,7 @@ class NollySubApp:
                                bg=COLORS["bg_elevated"], fg=COLORS["text_secondary"],
                                font=("Segoe UI", 9),
                                relief="flat", cursor="hand2",
-                               activebackground=COLORS["border_light"],
+                               activebackground=COLORS["bg_hover"],
                                activeforeground=COLORS["text_primary"],
                                padx=12, pady=5,
                                command=self._open_download_folder)
@@ -2129,7 +2175,7 @@ class NollySubApp:
 
         settings_btn = tk.Button(btn_frame, text="⚙️ Ayarlar",
                                  bg=COLORS["accent"], fg="white",
-                                 font=("Segoe UI", 10, "bold"),
+                                 font=("Segoe UI", 9, "bold"),
                                  relief="flat", cursor="hand2",
                                  activebackground=COLORS["accent_hover"],
                                  activeforeground="white",
@@ -2138,18 +2184,19 @@ class NollySubApp:
         settings_btn.pack(side=tk.LEFT, padx=(8, 0))
 
     def _build_search_section(self, parent):
-        """Arama bölümü."""
-        search_frame = tk.Frame(parent, bg=COLORS["bg_deepest"])
-        search_frame.pack(fill=tk.X, padx=20, pady=(20, 10))
+        """Fluent Arama Kartı Bölümü."""
+        search_card = tk.Frame(parent, bg=COLORS["bg_surface"], padx=18, pady=12,
+                               highlightthickness=1, highlightbackground=COLORS["border"])
+        search_card.pack(fill=tk.X, padx=20, pady=(14, 10))
 
-        hint_label = tk.Label(search_frame,
-                              text="🔍 Anime adı yazıp Türkçe altyazı ve torrent arayın (ör: One Piece, Solo Leveling)",
-                              bg=COLORS["bg_deepest"],
-                              fg=COLORS["text_muted"],
+        hint_label = tk.Label(search_card,
+                              text="🔍 Anime adı yazıp altyazı ve torrent arayın (ör: One Piece, Solo Leveling, Bleach, Frieren)",
+                              bg=COLORS["bg_surface"],
+                              fg=COLORS["text_secondary"],
                               font=("Segoe UI", 9))
         hint_label.pack(anchor=tk.W, pady=(0, 6))
 
-        search_row = tk.Frame(search_frame, bg=COLORS["bg_deepest"])
+        search_row = tk.Frame(search_card, bg=COLORS["bg_surface"])
         search_row.pack(fill=tk.X)
 
         self.search_var = tk.StringVar()
@@ -2157,10 +2204,10 @@ class NollySubApp:
                                      textvariable=self.search_var,
                                      bg=COLORS["bg_input"],
                                      fg=COLORS["text_primary"],
-                                     insertbackground=COLORS["accent"],
-                                     font=("Segoe UI", 13),
+                                     insertbackground=COLORS["accent_light"],
+                                     font=("Segoe UI", 12),
                                      relief="flat",
-                                     highlightthickness=2,
+                                     highlightthickness=1,
                                      highlightbackground=COLORS["border"],
                                      highlightcolor=COLORS["accent"],
                                      selectbackground=COLORS["accent"],
@@ -2175,24 +2222,24 @@ class NollySubApp:
 
         self.search_btn = tk.Button(search_row, text="🔎  Ara",
                                     bg=COLORS["accent"], fg="white",
-                                    font=("Segoe UI", 11, "bold"),
+                                    font=("Segoe UI", 10, "bold"),
                                     relief="flat", cursor="hand2",
                                     activebackground=COLORS["accent_hover"],
                                     activeforeground="white",
-                                    padx=24, pady=6,
+                                    padx=22, pady=7,
                                     command=self._do_search)
         self.search_btn.pack(side=tk.LEFT)
 
         # Kaynak bilgisi
-        source_frame = tk.Frame(search_frame, bg=COLORS["bg_deepest"])
-        source_frame.pack(fill=tk.X, pady=(8, 0))
+        source_frame = tk.Frame(search_card, bg=COLORS["bg_surface"])
+        source_frame.pack(fill=tk.X, pady=(6, 0))
 
-        engine_names = ", ".join(e.NAME for e in self.engines) if self.engines else "Yapılandırılmadı"
-        engine_color = COLORS["success"] if self.engines else COLORS["warning"]
+        engine_names = " • ".join(e.NAME for e in self.engines) if self.engines else "Yapılandırılmadı"
+        engine_color = COLORS["info"] if self.engines else COLORS["warning"]
 
         source_label = tk.Label(source_frame,
-                                text=f"Aktif veritabanları & kaynaklar: {engine_names}",
-                                bg=COLORS["bg_deepest"],
+                                text=f"⚡ Bağlı Veritabanları: {engine_names}",
+                                bg=COLORS["bg_surface"],
                                 fg=engine_color,
                                 font=("Segoe UI", 8))
         source_label.pack(side=tk.LEFT)
@@ -2200,7 +2247,7 @@ class NollySubApp:
 
     def _set_placeholder(self):
         if self._search_placeholder_active and not self.search_var.get():
-            self.search_entry.insert(0, "Anime adı girin... (ör: Death Note, Bleach, Demon Slayer)")
+            self.search_entry.insert(0, "Anime adı girin... (ör: One Piece, Solo Leveling, Death Note)")
             self.search_entry.config(fg=COLORS["text_faint"])
             self._search_placeholder_active = True
 
@@ -2216,26 +2263,62 @@ class NollySubApp:
             self._set_placeholder()
 
     def _build_results_table(self, parent):
-        """Sonuç tablosu."""
+        """Sonuç tablosu ve Sağ Orta Filtre Çubuğu (Windows Fluent Design)."""
         table_frame = tk.Frame(parent, bg=COLORS["bg_deepest"])
         table_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 10))
 
         table_header = tk.Frame(table_frame, bg=COLORS["bg_deepest"])
         table_header.pack(fill=tk.X, pady=(0, 8))
 
+        # Sol taraf: Başlık & Durum etiketi
         self.results_label = tk.Label(table_header,
-                                      text="Arama sonuçları burada görünecek",
+                                      text="Arama sonuçları burada listelenecek",
                                       bg=COLORS["bg_deepest"],
-                                      fg=COLORS["text_muted"],
-                                      font=("Segoe UI", 10))
-        self.results_label.pack(side=tk.LEFT)
+                                      fg=COLORS["text_secondary"],
+                                      font=("Segoe UI", 10, "bold"))
+        self.results_label.pack(side=tk.LEFT, anchor=tk.W, pady=4)
+
+        # Sağ Orta Köşe: Kaynak Filtre Paneli (Fluent Filter Chips)
+        filter_panel = tk.Frame(table_header, bg=COLORS["bg_surface"],
+                                highlightthickness=1, highlightbackground=COLORS["border"],
+                                padx=6, pady=3)
+        filter_panel.pack(side=tk.RIGHT, anchor=tk.E)
+
+        tk.Label(filter_panel, text="🎯 Kaynak Filtresi:", bg=COLORS["bg_surface"],
+                 fg=COLORS["text_muted"], font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT, padx=(4, 6))
+
+        # Filtre seçenekleri
+        self.FILTER_SOURCES = [
+            ("ALL", "✨ Tümü"),
+            ("Nyaa.si", "🍙 Nyaa.si"),
+            ("AnimeTosho", "⚡ AnimeTosho"),
+            ("nekoBT", "🐱 nekoBT"),
+            ("SubsPlease", "🍿 SubsPlease"),
+            ("OpenSubtitles", "🌐 OpenSubtitles"),
+            ("SubDL", "📦 SubDL"),
+        ]
+
+        self.source_buttons = {}
+        for src_key, src_label in self.FILTER_SOURCES:
+            btn = tk.Button(filter_panel, text=src_label,
+                            bg=COLORS["accent"] if src_key == "ALL" else COLORS["bg_elevated"],
+                            fg="#ffffff" if src_key == "ALL" else COLORS["text_secondary"],
+                            activebackground=COLORS["accent_hover"],
+                            activeforeground="#ffffff",
+                            font=("Segoe UI", 8, "bold" if src_key == "ALL" else "normal"),
+                            relief="flat", cursor="hand2", padx=8, pady=3,
+                            command=lambda sk=src_key: self._on_filter_source_click(sk))
+            btn.pack(side=tk.LEFT, padx=2)
+            self.source_buttons[src_key] = btn
 
         # Tablo kapsayıcısı
-        container = tk.Frame(table_frame, bg=COLORS["bg_deep"], highlightthickness=1, highlightbackground=COLORS["border"])
+        container = tk.Frame(table_frame, bg=COLORS["bg_deepest"],
+                             highlightthickness=1, highlightbackground=COLORS["border"])
         container.pack(fill=tk.BOTH, expand=True)
 
         columns = ("source", "title", "language", "release", "download_count")
-        self.tree = ttk.Treeview(container, columns=columns, show="headings", style="Dark.Treeview", selectmode="browse")
+        self.tree = ttk.Treeview(container, columns=columns, show="headings",
+                                 style="Dark.Treeview", selectmode="browse")
 
         self.tree.heading("source", text="Kaynak 🌐", anchor=tk.W)
         self.tree.heading("title", text="Başlık / Dosya Adı 🔗", anchor=tk.W)
@@ -2244,13 +2327,14 @@ class NollySubApp:
         self.tree.heading("download_count", text="İndirme / Seeds", anchor=tk.E)
 
         self.tree.column("source", width=120, minwidth=100, stretch=False)
-        self.tree.column("title", width=380, minwidth=220, stretch=True)
-        self.tree.column("language", width=110, minwidth=85, stretch=False, anchor=tk.CENTER)
-        self.tree.column("release", width=200, minwidth=140, stretch=False)
-        self.tree.column("download_count", width=160, minwidth=140, stretch=False, anchor=tk.E)
+        self.tree.column("title", width=420, minwidth=240, stretch=True)
+        self.tree.column("language", width=120, minwidth=90, stretch=False, anchor=tk.CENTER)
+        self.tree.column("release", width=220, minwidth=140, stretch=False)
+        self.tree.column("download_count", width=140, minwidth=110, stretch=False, anchor=tk.E)
 
         # Scrollbar
-        scrollbar = ttk.Scrollbar(container, orient=tk.VERTICAL, command=self.tree.yview, style="Dark.Vertical.TScrollbar")
+        scrollbar = ttk.Scrollbar(container, orient=tk.VERTICAL,
+                                  command=self.tree.yview, style="Dark.Vertical.TScrollbar")
         self.tree.configure(yscrollcommand=scrollbar.set)
 
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -2262,9 +2346,97 @@ class NollySubApp:
         self.tree.bind("<Motion>", self._on_tree_motion)
         self.tree.bind("<Leave>", lambda e: self.tree.config(cursor=""))
 
+    def _on_filter_source_click(self, source_key):
+        """Kullanıcı kaynak butonuna tıkladığında çoklu veya tekli kaynak filtresi uygular."""
+        if source_key == "ALL":
+            self.active_sources.clear()
+        else:
+            # Eğer tümü aktif durumdaysa ve bir kaynağa basıldıysa, sadece o kaynağı seç
+            if not self.active_sources:
+                self.active_sources = {source_key}
+            elif source_key in self.active_sources:
+                self.active_sources.remove(source_key)
+            else:
+                self.active_sources.add(source_key)
+
+        self._update_filter_button_styles()
+        self._apply_filter_to_table()
+
+    def _update_filter_button_styles(self):
+        """Filtre butonlarının renk ve sayaçlarını günceller."""
+        all_active = len(self.active_sources) == 0
+
+        counts = {}
+        for r in getattr(self, "all_results", []):
+            src = r.get("source", "")
+            counts[src] = counts.get(src, 0) + 1
+
+        total_count = len(getattr(self, "all_results", []))
+
+        for src_key, src_label in self.FILTER_SOURCES:
+            btn = self.source_buttons.get(src_key)
+            if not btn:
+                continue
+
+            if src_key == "ALL":
+                is_selected = all_active
+                badge = f" ({total_count})" if total_count > 0 else ""
+                btn.config(text=f"✨ Tümü{badge}")
+            else:
+                is_selected = src_key in self.active_sources
+                c = counts.get(src_key, 0)
+                badge = f" ({c})" if total_count > 0 else ""
+                clean_name = src_label.split()[1] if " " in src_label else src_label
+                icon = src_label.split()[0] if " " in src_label else ""
+                btn.config(text=f"{icon} {clean_name}{badge}")
+
+            if is_selected:
+                btn.config(bg=COLORS["accent"], fg="#ffffff",
+                           font=("Segoe UI", 8, "bold"))
+            else:
+                btn.config(bg=COLORS["bg_elevated"], fg=COLORS["text_muted"],
+                           font=("Segoe UI", 8, "normal"))
+
+    def _apply_filter_to_table(self):
+        """Arama sonuçlarını seçili kaynak filtresine göre filtreleyip tabloyu günceller."""
+        self.tree.delete(*self.tree.get_children())
+        all_res = getattr(self, "all_results", [])
+        if not all_res:
+            return
+
+        if self.active_sources:
+            filtered = [r for r in all_res if r.get("source") in self.active_sources]
+        else:
+            filtered = list(all_res)
+
+        self.results = filtered
+        query = getattr(self, "_last_query", "")
+
+        if self.active_sources:
+            active_names = ", ".join(sorted(self.active_sources))
+            self.results_label.config(
+                text=f"'{query}' — Gösterilen: {len(filtered)} / {len(all_res)} Sonuç  [Filtre: {active_names}]",
+                fg=COLORS["accent_light"]
+            )
+        else:
+            self.results_label.config(
+                text=f"'{query}' — Toplam {len(all_res)} Sonuç  •  💡 Çift tıklayarak indirin veya bağlantıyı açın",
+                fg=COLORS["text_secondary"]
+            )
+
+        for idx, item in enumerate(filtered):
+            self.tree.insert("", tk.END, iid=str(idx), values=(
+                item.get("source", "-"),
+                item.get("title", "-"),
+                item.get("language", "-"),
+                item.get("release", "-"),
+                item.get("download_count", "0"),
+            ))
+
     def _build_footer(self, parent):
         """Alt çubuk (Durum ve İndirme Butonu)."""
-        footer = tk.Frame(parent, bg=COLORS["bg_surface"], height=60)
+        footer = tk.Frame(parent, bg=COLORS["bg_surface"], height=60,
+                          highlightthickness=1, highlightbackground=COLORS["border"])
         footer.pack(fill=tk.X, side=tk.BOTTOM)
         footer.pack_propagate(False)
 
@@ -2279,7 +2451,7 @@ class NollySubApp:
                                      font=("Segoe UI", 10))
         self.status_label.pack(side=tk.LEFT)
 
-        # İlerleme çubuğu (Özel stillendirilmiş)
+        # İlerleme çubuğu
         self.progress = ttk.Progressbar(status_frame, mode="indeterminate", length=180, style="Custom.Horizontal.TProgressbar")
 
         # Sağ: İndir Butonu ve Sitede Aç Butonu
@@ -2295,11 +2467,11 @@ class NollySubApp:
         self.download_btn.pack(side=tk.RIGHT, padx=20, pady=10)
 
         self.open_site_btn = tk.Button(footer,
-                                       text="🌐  Sitede Aç (Nyaa/Kaynak)",
+                                       text="🌐  Sitede Aç (Web Sayfası)",
                                        bg=COLORS["bg_elevated"], fg=COLORS["text_primary"],
                                        font=("Segoe UI", 10),
                                        relief="flat", cursor="hand2",
-                                       activebackground=COLORS["bg_surface"],
+                                       activebackground=COLORS["bg_hover"],
                                        activeforeground=COLORS["accent_light"],
                                        padx=16, pady=6,
                                        command=self._open_selected_url)
@@ -2326,9 +2498,11 @@ class NollySubApp:
         self.progress.start(10)
 
         # Tabloyu temizle
-        for item in self.tree.get_children():
-            self.tree.delete(item)
+        self.tree.delete(*self.tree.get_children())
+        self.all_results = []
         self.results = []
+        self._last_query = query
+        self._update_filter_button_styles()
 
         # Arka plan iş parçacığı
         threading.Thread(target=self._search_thread, args=(query,), daemon=True).start()
@@ -2353,8 +2527,13 @@ class NollySubApp:
         for t in threads:
             t.join()
 
-        # Türkçe olanları en üste sırala
-        all_results.sort(key=lambda x: (not is_tr_subtitle(x), x.get("title", "")))
+        # Doğal indirme / tohumlama sayısına göre sırala
+        def _get_sort_val(item):
+            raw = str(item.get("download_count", "0")).replace(",", "").replace(".", "").strip()
+            m = re.search(r'\d+', raw)
+            return int(m.group(0)) if m else 0
+
+        all_results.sort(key=_get_sort_val, reverse=True)
 
         # UI'ya ilet
         self.root.after(0, self._on_search_complete, all_results, query)
@@ -2365,31 +2544,18 @@ class NollySubApp:
         self.progress.pack_forget()
         self.search_btn.config(state=tk.NORMAL)
 
-        self.results = results
+        self._last_query = query
+        self.all_results = results
 
         if not results:
             self.status_label.config(text=f"'{query}' için sonuç bulunamadı.", fg=COLORS["warning"])
             self.results_label.config(text="Sonuç bulunamadı.")
+            self._update_filter_button_styles()
             return
 
-        tr_count = sum(1 for r in results if is_tr_subtitle(r))
-        self.status_label.config(text=f"Toplam {len(results)} sonuç bulundu ({tr_count} Türkçe).", fg=COLORS["success"])
-        self.results_label.config(text=f"'{query}' — {len(results)} Sonuç ({tr_count} Türkçe)  •  💡 Başlığa veya Kaynağa tıklayarak web sayfasına gidebilirsiniz")
-
-        for idx, item in enumerate(results):
-            tags = ()
-            if is_tr_subtitle(item):
-                tags = ("tr_row",)
-
-            self.tree.insert("", tk.END, iid=str(idx), values=(
-                item.get("source", "-"),
-                item.get("title", "-"),
-                item.get("language", "-"),
-                item.get("release", "-"),
-                item.get("download_count", "0"),
-            ), tags=tags)
-
-        self.tree.tag_configure("tr_row", foreground="#4ade80")
+        self.status_label.config(text=f"Toplam {len(results)} sonuç bulundu.", fg=COLORS["success"])
+        self._update_filter_button_styles()
+        self._apply_filter_to_table()
 
     def _get_item_url(self, item):
         """Verilen arama sonucunun ait olduğu web sitesi sayfasının URL'sini (Nyaa, AnimeTosho vb.) döndürür."""
@@ -2657,8 +2823,8 @@ class NollySubApp:
         """Gelişmiş Ayarlar Penceresi."""
         settings_win = tk.Toplevel(self.root)
         settings_win.title("⚙️ NollySub — Uygulama & API Ayarları")
-        settings_win.geometry("640x660")
-        settings_win.minsize(600, 580)
+        center_window(settings_win, 700, 700)
+        apply_fluent_window_theme(settings_win, 620, 600)
         settings_win.configure(bg=COLORS["bg_deepest"])
         settings_win.transient(self.root)
         settings_win.grab_set()
@@ -2950,7 +3116,8 @@ class NollySubApp:
         # Modal Pencere Oluştur
         sub_win = tk.Toplevel(self.root)
         sub_win.title("🎬 NollySub — MKV Altyazı Seçimi ve Çıkarma")
-        sub_win.geometry("820x540")
+        center_window(sub_win, 1080, 680)
+        apply_fluent_window_theme(sub_win, 860, 560)
         sub_win.configure(bg=COLORS["bg_surface"])
         sub_win.transient(self.root)
 
@@ -2982,13 +3149,13 @@ class NollySubApp:
         tree.heading("name", text="Başlık / İsim", anchor=tk.W)
         tree.heading("flags", text="Bayraklar", anchor=tk.CENTER)
 
-        tree.column("select", width=85, minwidth=70, stretch=False, anchor=tk.CENTER)
-        tree.column("filename", width=220, minwidth=150, stretch=True, anchor=tk.W)
-        tree.column("track_id", width=65, minwidth=50, stretch=False, anchor=tk.CENTER)
+        tree.column("select", width=90, minwidth=75, stretch=False, anchor=tk.CENTER)
+        tree.column("filename", width=280, minwidth=160, stretch=True, anchor=tk.W)
+        tree.column("track_id", width=70, minwidth=50, stretch=False, anchor=tk.CENTER)
         tree.column("lang", width=120, minwidth=90, stretch=False, anchor=tk.CENTER)
         tree.column("codec", width=95, minwidth=70, stretch=False, anchor=tk.CENTER)
-        tree.column("name", width=140, minwidth=100, stretch=False, anchor=tk.W)
-        tree.column("flags", width=100, minwidth=80, stretch=False, anchor=tk.CENTER)
+        tree.column("name", width=220, minwidth=120, stretch=True, anchor=tk.W)
+        tree.column("flags", width=110, minwidth=85, stretch=False, anchor=tk.CENTER)
 
         scrollbar = ttk.Scrollbar(tree_container, orient=tk.VERTICAL, command=tree.yview, style="Dark.Vertical.TScrollbar")
         tree.configure(yscrollcommand=scrollbar.set)
@@ -3217,9 +3384,8 @@ class NollySubApp:
 
         dub_win = tk.Toplevel(self.root)
         dub_win.title("🎙️ NollySub — MKV / MP4 Dublaj & Ses İzi Değiştirici")
-        dub_win.geometry("820x620")
-        dub_win.minsize(740, 480)
-        dub_win.resizable(True, True)
+        center_window(dub_win, 1080, 720)
+        apply_fluent_window_theme(dub_win, 860, 560)
         dub_win.configure(bg=COLORS["bg_surface"])
         dub_win.transient(self.root)
 
@@ -3388,6 +3554,9 @@ class NollySubApp:
 
             inner_tracks_frame.update_idletasks()
             canvas.configure(scrollregion=canvas.bbox("all"))
+            cw = canvas.winfo_width()
+            if cw > 50:
+                canvas.itemconfig(canvas_window, width=cw)
 
         def load_mkv_tracks():
             nonlocal audio_tracks
@@ -3401,6 +3570,9 @@ class NollySubApp:
                          bg=COLORS["bg_deep"], fg=COLORS["text_muted"], font=("Segoe UI", 10)).pack(pady=40)
                 inner_tracks_frame.update_idletasks()
                 canvas.configure(scrollregion=canvas.bbox("all"))
+                cw = canvas.winfo_width()
+                if cw > 50:
+                    canvas.itemconfig(canvas_window, width=cw)
                 return
 
             try:
@@ -3515,8 +3687,8 @@ class NollySubApp:
         """Toplu altyazı format dönüştürücü arayüzü (SRT, ASS, VTT, TXT)."""
         conv_win = tk.Toplevel(self.root)
         conv_win.title("🔄 NollySub — Toplu Altyazı Format Dönüştürücü")
-        conv_win.geometry("860x620")
-        conv_win.minsize(760, 520)
+        center_window(conv_win, 1080, 700)
+        apply_fluent_window_theme(conv_win, 860, 560)
         conv_win.configure(bg=COLORS["bg_surface"])
         conv_win.transient(self.root)
         conv_win.grab_set()
@@ -3637,11 +3809,11 @@ class NollySubApp:
         tree.heading("target_fmt", text="Hedef Format", anchor=tk.CENTER)
         tree.heading("folder", text="Klasör Konumu", anchor=tk.W)
 
-        tree.column("status", width=110, minwidth=90, stretch=False, anchor=tk.CENTER)
-        tree.column("filename", width=220, minwidth=140, stretch=True, anchor=tk.W)
-        tree.column("src_fmt", width=100, minwidth=80, stretch=False, anchor=tk.CENTER)
-        tree.column("target_fmt", width=100, minwidth=80, stretch=False, anchor=tk.CENTER)
-        tree.column("folder", width=280, minwidth=180, stretch=True, anchor=tk.W)
+        tree.column("status", width=120, minwidth=90, stretch=False, anchor=tk.CENTER)
+        tree.column("filename", width=320, minwidth=180, stretch=True, anchor=tk.W)
+        tree.column("src_fmt", width=110, minwidth=80, stretch=False, anchor=tk.CENTER)
+        tree.column("target_fmt", width=110, minwidth=80, stretch=False, anchor=tk.CENTER)
+        tree.column("folder", width=380, minwidth=200, stretch=True, anchor=tk.W)
 
         scrollbar = ttk.Scrollbar(tree_container, orient=tk.VERTICAL, command=tree.yview, style="Dark.Vertical.TScrollbar")
         tree.configure(yscrollcommand=scrollbar.set)
@@ -3828,8 +4000,8 @@ class NollySubApp:
 
         conv_win = tk.Toplevel(self.root)
         conv_win.title("🎥 NollySub — MKV -> MP4 Video Dönüştürücü")
-        conv_win.geometry("900x640")
-        conv_win.minsize(800, 540)
+        center_window(conv_win, 1080, 700)
+        apply_fluent_window_theme(conv_win, 860, 560)
         conv_win.configure(bg=COLORS["bg_surface"])
         conv_win.transient(self.root)
 
@@ -4037,10 +4209,10 @@ class NollySubApp:
         tree.heading("folder", text="Klasör", anchor=tk.W)
 
         tree.column("status", width=140, minwidth=110, stretch=False, anchor=tk.CENTER)
-        tree.column("filename", width=260, minwidth=160, stretch=True, anchor=tk.W)
-        tree.column("size", width=90, minwidth=70, stretch=False, anchor=tk.CENTER)
-        tree.column("mode", width=100, minwidth=80, stretch=False, anchor=tk.CENTER)
-        tree.column("folder", width=250, minwidth=150, stretch=True, anchor=tk.W)
+        tree.column("filename", width=300, minwidth=180, stretch=True, anchor=tk.W)
+        tree.column("size", width=100, minwidth=80, stretch=False, anchor=tk.CENTER)
+        tree.column("mode", width=110, minwidth=80, stretch=False, anchor=tk.CENTER)
+        tree.column("folder", width=350, minwidth=200, stretch=True, anchor=tk.W)
 
         scrollbar = ttk.Scrollbar(tree_container, orient=tk.VERTICAL, command=tree.yview, style="Dark.Vertical.TScrollbar")
         tree.configure(yscrollcommand=scrollbar.set)

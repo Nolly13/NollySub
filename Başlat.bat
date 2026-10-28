@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 > nul
-title NollySub - Anime Turkce Altyazi Indirici
+title NollySub - Anime Altyazı & Salım Toplayıcı
 cd /d "%~dp0"
 
 echo ========================================================

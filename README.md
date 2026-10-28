@@ -16,7 +16,7 @@
 
 ## ✨ Özellikler
 
-- 🌸 **Entegre Anime Veritabanları**:
+- 🌸 **Entegre Anime & Altyazı Veritabanları**:
   - 🐱 **nekoBT** (Anime Tracker & Fansub Topluluğu — Torznab RSS & API, doğrudan .torrent & magnet indirme)
   - ⚡ **AnimeTosho** (JSON API entegrasyonu — Torrent & Altyazılar)
   - 🍙 **Nyaa.si** (Gelişmiş Web API & Parser — kernelginar/nyaa-api)
@@ -24,21 +24,22 @@
   - 🌐 **OpenSubtitles.com** (REST API v1)
   - 📦 **SubDL.com** (Altyazı Arşivi)
 
-- 🇹🇷 **Akıllı Türkçe Altyazı Algılama**:
-  - Türkçe içerikli salımları otomatik tespit eder ve sonuç listesinin en üstünde yeşil renkle vurgular.
+- 🎯 **Dinamik Çoklu Kaynak Filtreleme**:
+  - Arama sonuçlarında sağ orta panelden tek tıkla veya çoklu seçimle kaynakları filtreleme (Nyaa.si, AnimeTosho, OpenSubtitles, SubDL, nekoBT, SubsPlease).
+
+- 🎨 **Windows 11 Fluent Design Kullanıcı Arayüzü**:
+  - Windows 11 Dark Mica renk paleti, yerel karanlık başlık çubuğu (DWM Immersive Dark Mode), modern Fluent kartları, pill butonları ve akıcı görsel hiyerarşi.
+
+- 🖥️ **Tam Ekran & Responsive Pencere Desteği**:
+  - Altyazı çıkarma, dublaj değiştirici ve format dönüştürücü pencerelerinde ekrana tam oturan, esnek ve dinamik genişleyen responsive tablo ve liste tasarımı.
 
 - 🎬 **Gelişmiş MKV & MP4 Araç Kutusu**:
-  - **MKV -> MP4 Video Dönüştürücü**: MKV formatındaki video dosyalarını saniyeler içinde kalite kaybı olmadan (Hızlı Remux) veya tam yeniden kodlama (H.264/AAC) ile `.mp4` formatına dönüştürür. Dönüştürülen dosyaları orijinal klasöre veya **özel seçilen hedef klasöre** aktarma desteği sunar.
-  - **MKV / MP4 Dublaj & Ses İzi Değiştirici**: MKV ve MP4 videolarının varsayılan ses izini (Türkçe/Japonca/İngilizce vb.) toplu veya tekli olarak yeniden kodlamadan fiziki olarak değiştirir.
-  - **MKV Altyazı Çıkarıcı**: `.mkv` dosyalarının içerisindeki gömülü altyazıları tek tıkla `.srt` / `.ass` dosyası olarak dışarı kaydeder.
-
+  - **MKV -> MP4 Video Dönüştürücü**: MKV formatındaki video dosyalarını saniyeler içinde kalite kaybı olmadan (Hızlı Remux) veya tam yeniden kodlama (H.264/AAC) ile `.mp4` formatına dönüştürür.
+  - **MKV / MP4 Dublaj & Ses İzi Değiştirici**: MKV ve MP4 videolarının varsayılan ses izini toplu veya tekli olarak yeniden kodlamadan fiziki olarak değiştirir.
+  - **MKV Altyazı Çıkarıcı**: `.mkv` dosyalarının içerisindeki gömülü altyazıları tek tıkla `.srt` / `.ass` dosyası olarak dışarı aktarır.
 
 - 🔄 **Toplu Altyazı Format Dönüştürücü**:
   - Çoklu altyazı dosyalarını veya tüm bir klasörü saniyeler içinde toplu olarak `.srt`, `.ass`, `.vtt` veya düz metin (`.txt`) formatlarına dönüştürür.
-
-
-- 🎨 **Modern & Şık Kullanıcı Arayüzü**:
-  - Karanlık tema, özel karakter logosu, hızlı arama filtreleri ve masaüstü kısayolu oluşturma desteği.
 
 ---
 
@@ -61,7 +62,7 @@ pip install -r requirements.txt
 ```bash
 py nollysub.py
 # veya
-python netrip.py
+python nollysub.py
 ```
 
 ---
@@ -87,8 +88,8 @@ NollySub/
 ├── nekobt_api.py         # nekoBT Torznab & Torrent istemcisi
 ├── nyaa_api.py           # Nyaa.si bağımsız API ayrıştırıcısı
 ├── nollysub.py           # Ana uygulama giriş noktası
-├── netrip.py             # Geriye dönük uyumluluk başlatıcısı
 ├── requirements.txt      # Gerekli Python kütüphaneleri
+├── Başlat.bat            # Windows başlatıcı
 ├── .gitignore            # Git yoksayma kuralları
 └── README.md             # Proje dokümantasyonu
 ```
