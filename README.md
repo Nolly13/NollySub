@@ -27,8 +27,9 @@
 - 🎯 **Dinamik Çoklu Kaynak Filtreleme**:
   - Arama sonuçlarında sağ orta panelden tek tıkla veya çoklu seçimle kaynakları filtreleme (Nyaa.si, AnimeTosho, OpenSubtitles, SubDL, nekoBT, SubsPlease).
 
-- 🎨 **Windows 11 Fluent Design Kullanıcı Arayüzü**:
-  - Windows 11 Dark Mica renk paleti, yerel karanlık başlık çubuğu (DWM Immersive Dark Mode), modern Fluent kartları, pill butonları ve akıcı görsel hiyerarşi.
+- 🎨 **OpenAnime Translucent Glass & Windows 11 Fluent Tasarımı**:
+  - OpenAnime platformundan ilham alan derin uzay mavisi cam arkaplanı, yarı saydam kartlar (Glassmorphism), Windows 11 Acrylic blur efekti ve dinamik pencere saydamlığı (Alpha Transparency) desteği.
+  - Başlık çubuğunda tek tıkla cam modunu açıp kapatma veya Ayarlar menüsünden canlı kaydırıcı ile opaklık oranını (%70 - %100) ayarlayabilme imkanı.
 
 - 🖥️ **Tam Ekran & Responsive Pencere Desteği**:
   - Altyazı çıkarma, dublaj değiştirici ve format dönüştürücü pencerelerinde ekrana tam oturan, esnek ve dinamik genişleyen responsive tablo ve liste tasarımı.

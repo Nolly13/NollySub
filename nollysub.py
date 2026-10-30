@@ -83,50 +83,85 @@ SUBDL_API = "https://api.subdl.com/api/v1"
 ANIMETOSHO_API = "https://feed.animetosho.org/json"
 
 # ══════════════════════════════════════════════════════
-# RENK TEMASI (Windows 11 Fluent Design — Mica Dark)
+# RENK TEMASI (OpenAnime Translucent Dark Glassmorphism)
 # ══════════════════════════════════════════════════════
 
 COLORS = {
-    "bg_deepest": "#202020",      # Windows 11 Dark Mica canvas
-    "bg_deep": "#1a1a1a",         # Inset containers
-    "bg_surface": "#2b2b2b",      # Fluent Card Surface
-    "bg_elevated": "#323232",     # Elevated card / dropdown / dialog
-    "bg_hover": "#3a3a3a",        # Hover state
-    "bg_input": "#1f1f1f",        # Fluent input background
-    "accent": "#0078d4",          # Windows 11 Fluent Blue Accent
-    "accent_hover": "#1084d9",    # Accent hover
-    "accent_light": "#60cdff",    # Accent light / active highlight
-    "accent_pressed": "#0067b8",  # Accent pressed
-    "border": "#3c3c3c",          # Fluent subtle border
-    "border_light": "#4a4a4a",    # Fluent light border
-    "border_card": "#333333",     # Card border
-    "text_primary": "#ffffff",    # Fluent primary text
-    "text_secondary": "#cccccc",  # Fluent secondary text
-    "text_muted": "#8c8c8c",      # Muted text
-    "text_faint": "#606060",      # Placeholder / faint
-    "success": "#6ccb5f",         # Fluent green
-    "info": "#60cdff",            # Fluent info blue
-    "warning": "#fce100",         # Fluent warning yellow
-    "danger": "#ff6f61",          # Fluent danger red
-    "highlight_row": "#26354a",   # Fluent blue row selection
-    "scrollbar": "#4a4a4a",
+    # OpenAnime saydam cam & gece mavisi paleti
+    "bg_deepest": "#0b0f19",      # OpenAnime derin uzay mavisi cam zemin
+    "bg_deep": "#080c14",         # Derin panel arkaplanı
+    "bg_surface": "#111827",      # OpenAnime yarı-saydam cam kart yüzeyi
+    "bg_elevated": "#172238",     # Yükseltilmiş cam kart / popup / menü
+    "bg_hover": "#1e2d4a",        # Cam hover durumu
+    "bg_input": "#0d131f",        # Cam arama / giriş alanı
+    "accent": "#0084ff",          # OpenAnime canlı elektrik mavisi
+    "accent_hover": "#2693ff",    # Buton hover canlı mavi
+    "accent_light": "#38bdf8",    # OpenAnime Cyan / parlak vurgu
+    "accent_pressed": "#006ed4",  # Buton basılma hali
+    "accent_glow": "#1d4ed8",     # Cam kenarlık mavi ışıma efekti
+    "border": "#1e293b",          # Cam kart kenarlığı
+    "border_light": "#2e3d54",    # Açık cam kenarlık
+    "border_card": "#223048",     # İç kart kenarlık
+    "text_primary": "#f8fafc",    # Canlı beyaz metin
+    "text_secondary": "#cbd5e1",  # Slate açık gri
+    "text_muted": "#94a3b8",      # Slate yumuşak gri
+    "text_faint": "#64748b",      # Placeholder / soluk
+    "success": "#10b981",         # Canlı zümrüt yeşil
+    "info": "#38bdf8",            # OpenAnime Cyan
+    "warning": "#fbbf24",         # Amber sarı
+    "danger": "#f43f5e",          # Gül kırmızısı
+    "highlight_row": "#162a45",   # Cam mavi satır seçimi
+    "scrollbar": "#1e293b",
 }
 
-def apply_fluent_window_theme(win, min_w=920, min_h=600):
-    """Windows Fluent tasarım dark başlık çubuğu ve responsive pencere ayarlarını uygular."""
+DEFAULT_TRANSPARENCY_ALPHA = 0.94
+
+def apply_fluent_window_theme(win, min_w=920, min_h=600, alpha=None):
+    """Windows Fluent & OpenAnime cam (acrylic/translucent) arkaplan ve dark başlık çubuğu ayarlarını uygular."""
     try:
         win.minsize(min_w, min_h)
         win.resizable(True, True)
     except Exception:
         pass
+
+    # Saydamlık (Cam Saydamlığı / Alpha Transparency)
+    try:
+        if alpha is not None:
+            target_alpha = alpha
+        else:
+            try:
+                cfg = ConfigManager()
+                target_alpha = cfg.get_transparency_alpha()
+            except Exception:
+                target_alpha = DEFAULT_TRANSPARENCY_ALPHA
+
+        if 0.50 <= target_alpha <= 1.0:
+            win.attributes("-alpha", target_alpha)
+    except Exception:
+        pass
+
     try:
         win.update_idletasks()
         hwnd = ctypes.windll.user32.GetParent(win.winfo_id())
         if not hwnd:
             hwnd = win.winfo_id()
-        val = ctypes.c_int(1)
-        ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(val), ctypes.sizeof(val))
-        ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 19, ctypes.byref(val), ctypes.sizeof(val))
+
+        # DWMWA_USE_IMMERSIVE_DARK_MODE (20 veya eski Windows için 19)
+        dark_val = ctypes.c_int(1)
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(dark_val), ctypes.sizeof(dark_val))
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 19, ctypes.byref(dark_val), ctypes.sizeof(dark_val))
+
+        # DWMWA_SYSTEMBACKDROP_TYPE = 38 (3: DWMSBT_TRANSIENTWINDOW / Acrylic cam efekti)
+        backdrop_val = ctypes.c_int(3)
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 38, ctypes.byref(backdrop_val), ctypes.sizeof(backdrop_val))
+
+        # DWMWA_WINDOW_CORNER_PREFERENCE = 33 (2: DWMWCP_ROUND yuvarlak modern köşeler)
+        corner_val = ctypes.c_int(2)
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 33, ctypes.byref(corner_val), ctypes.sizeof(corner_val))
+
+        # DWMWA_BORDER_COLOR = 34 (OpenAnime cam mavi-lacivert kenarlık)
+        border_color = ctypes.c_int(0x483022)
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 34, ctypes.byref(border_color), ctypes.sizeof(border_color))
     except Exception:
         pass
 
@@ -226,6 +261,25 @@ class ConfigManager:
 
     def set_mkvtoolnix_dir(self, path):
         self.config["General"]["mkvtoolnix_dir"] = path
+        self.save()
+
+    def get_transparency_enabled(self):
+        val = self.config["General"].get("transparency_enabled", "true").lower()
+        return val in ("true", "1", "yes")
+
+    def set_transparency_enabled(self, enabled):
+        self.config["General"]["transparency_enabled"] = "true" if enabled else "false"
+        self.save()
+
+    def get_transparency_alpha(self):
+        try:
+            val = float(self.config["General"].get("transparency_alpha", str(DEFAULT_TRANSPARENCY_ALPHA)))
+            return max(0.50, min(1.0, val))
+        except Exception:
+            return DEFAULT_TRANSPARENCY_ALPHA
+
+    def set_transparency_alpha(self, alpha):
+        self.config["General"]["transparency_alpha"] = f"{float(alpha):.2f}"
         self.save()
 
     def find_mkvtoolnix(self):
@@ -3009,7 +3063,7 @@ class NollySubApp:
         # 5. FFMPEG SİSTEM DURUMU (MKV -> MP4 DÖNÜŞTÜRÜCÜ İÇİN)
         ffmpeg_exe = self.config.find_ffmpeg()
         ff_card = tk.Frame(content_frame, bg=COLORS["bg_surface"], padx=14, pady=10, highlightthickness=1, highlightbackground=COLORS["border"])
-        ff_card.pack(fill=tk.X)
+        ff_card.pack(fill=tk.X, pady=(0, 12))
 
         if ffmpeg_exe:
             ff_status_lbl = tk.Label(ff_card, text="🟢 FFmpeg Tespit Edildi: MKV -> MP4 Video Dönüştürücü aktif.",
@@ -3030,6 +3084,78 @@ class NollySubApp:
                                   command=get_ff)
             ff_dl_btn.pack(side=tk.RIGHT)
 
+        # 6. PENCERE SAYDAMLIK (CAM EFEKTİ)
+        glass_card = tk.Frame(content_frame, bg=COLORS["bg_surface"], padx=14, pady=12, highlightthickness=1, highlightbackground=COLORS["border"])
+        glass_card.pack(fill=tk.X)
+
+        glass_title = tk.Label(glass_card, text="Pencere Saydamlığı (Cam Efekti)", bg=COLORS["bg_surface"],
+                               fg=COLORS["text_primary"], font=("Segoe UI", 10, "bold"))
+        glass_title.pack(anchor=tk.W)
+
+        glass_hint = tk.Label(glass_card,
+                              text="Pencere arkaplanı cam olarak saydam görünür. Kaydırıcı ile opaklık seviyesini ayarlayabilirsiniz.",
+                              bg=COLORS["bg_surface"], fg=COLORS["text_muted"], font=("Segoe UI", 9))
+        glass_hint.pack(anchor=tk.W, pady=(2, 6))
+
+        glass_ctrl_row = tk.Frame(glass_card, bg=COLORS["bg_surface"])
+        glass_ctrl_row.pack(fill=tk.X, pady=(2, 4))
+
+        glass_alpha_var = tk.DoubleVar(value=self.config.get_transparency_alpha())
+
+        def _update_live_transparency(*args):
+            cur_alpha = float(glass_alpha_var.get())
+            try:
+                self.root.attributes("-alpha", cur_alpha)
+                settings_win.attributes("-alpha", cur_alpha)
+            except Exception:
+                pass
+            pct = int(cur_alpha * 100)
+            alpha_val_lbl.config(text=f"%{pct} (Cam)")
+
+        cam_lbl = tk.Label(glass_ctrl_row, text="Saydam Cam Oranı:",
+                           bg=COLORS["bg_surface"], fg=COLORS["text_primary"],
+                           font=("Segoe UI", 9, "bold"))
+        cam_lbl.pack(side=tk.LEFT)
+
+        alpha_val_lbl = tk.Label(glass_ctrl_row, text=f"%{int(glass_alpha_var.get() * 100)} (Cam)",
+                                 bg=COLORS["bg_elevated"], fg=COLORS["accent_light"],
+                                 font=("Segoe UI", 9, "bold"), padx=8, pady=2)
+        alpha_val_lbl.pack(side=tk.RIGHT)
+
+        slider_row = tk.Frame(glass_card, bg=COLORS["bg_surface"])
+        slider_row.pack(fill=tk.X, pady=(6, 2))
+
+        def _on_slider_move(val):
+            try:
+                glass_alpha_var.set(float(val))
+                _update_live_transparency()
+            except Exception:
+                pass
+
+        alpha_scale = tk.Scale(slider_row, from_=0.70, to=1.00, resolution=0.01,
+                               orient=tk.HORIZONTAL, showvalue=False,
+                               bg=COLORS["bg_surface"], fg=COLORS["text_secondary"],
+                               troughcolor=COLORS["bg_input"], activebackground=COLORS["accent"],
+                               highlightthickness=0, command=_on_slider_move)
+        alpha_scale.set(glass_alpha_var.get())
+        alpha_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
+
+        # Hızlı Butonlar
+        def _set_preset(val):
+            glass_alpha_var.set(val)
+            alpha_scale.set(val)
+            _update_live_transparency()
+
+        btn_p1 = tk.Button(slider_row, text="%94 Cam", bg=COLORS["accent"], fg="white",
+                           font=("Segoe UI", 8, "bold"), relief="flat", cursor="hand2",
+                           padx=6, pady=2, command=lambda: _set_preset(0.94))
+        btn_p1.pack(side=tk.RIGHT, padx=2)
+
+        btn_p2 = tk.Button(slider_row, text="%100 Mat", bg=COLORS["bg_elevated"], fg=COLORS["text_secondary"],
+                           font=("Segoe UI", 8), relief="flat", cursor="hand2",
+                           padx=6, pady=2, command=lambda: _set_preset(1.00))
+        btn_p2.pack(side=tk.RIGHT, padx=2)
+
         # Alt Butonlar
         bottom_frame = tk.Frame(settings_win, bg=COLORS["bg_surface"], pady=12, padx=20)
         bottom_frame.pack(fill=tk.X, side=tk.BOTTOM)
@@ -3039,6 +3165,13 @@ class NollySubApp:
             self.config.set_subdl_key(sd_var.get().strip())
             self.config.set_nekobt_key(neko_var.get().strip())
             self.config.set_download_dir(dl_var.get().strip())
+
+            # Saydamlık ayarlarını kaydet
+            self.config.set_transparency_alpha(glass_alpha_var.get())
+            try:
+                self.root.attributes("-alpha", glass_alpha_var.get())
+            except Exception:
+                pass
 
             self._init_engines()
 
